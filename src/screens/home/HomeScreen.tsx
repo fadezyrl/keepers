@@ -30,7 +30,13 @@ export function HomeScreen() {
   const theme = useThemeColors();
   const {trips, sponsors, heroSlides, gallery} = useApp();
 
-  const upcoming = trips.filter(t => t.status !== 'completed');
+  const upcoming = trips.filter(
+    t =>
+      t.status !== 'completed' &&
+      t.status !== 'cancelled' &&
+      t.publishStatus !== 'cancelled' &&
+      t.publishStatus !== 'completed',
+  );
 
   const onSlidePress = (slide: HeroSlide) => {
     if (slide.tripId) {

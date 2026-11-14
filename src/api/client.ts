@@ -45,10 +45,8 @@ export async function loadStoredAccessToken() {
 
 export async function clearTokens() {
   memoryAccessToken = null;
-  await AsyncStorage.multiRemove([
-    STORAGE_KEYS.accessToken,
-    STORAGE_KEYS.refreshToken,
-  ]);
+  await AsyncStorage.removeItem(STORAGE_KEYS.accessToken);
+  await AsyncStorage.removeItem(STORAGE_KEYS.refreshToken);
 }
 
 async function refreshAccessToken(): Promise<string | null> {

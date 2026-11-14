@@ -1,7 +1,9 @@
 import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {showAlert} from '../../alerts';
 import {BrandLogo, Button, Input, Screen} from '../../components';
+import {useApp} from '../../context/AppContext';
 import {AuthStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
 import {FieldErrors, validateSignup} from '../../utils/validation';
@@ -10,6 +12,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 export function SignupScreen({navigation}: Props) {
   const theme = useThemeColors();
+  const {signup} = useApp();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,8 +20,9 @@ export function SignupScreen({navigation}: Props) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [loading, setLoading] = useState(false);
 
-  const onContinue = () => {
+  const onSubmit = async () => {
     const nextErrors = validateSignup({
       firstName,
       lastName,
@@ -31,17 +35,33 @@ export function SignupScreen({navigation}: Props) {
     if (Object.keys(nextErrors).length) {
       return;
     }
-    navigation.navigate('Otp', {
-      email: email.trim(),
-      mode: 'signup',
-      profile: {
+    setLoading(true);
+    try {
+      await signup({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
         phone: phone.trim(),
         password,
-      },
-    });
+      });
+      showAlert({
+        type: 'success',
+        title: 'Application submitted',
+        message:
+          'Your membership request is pending Admin approval. You can sign in once an administrator activates your account.',
+        buttonText: 'Go to Sign In',
+        onClose: () => navigation.navigate('Login'),
+      });
+    } catch (error) {
+      showAlert({
+        type: 'error',
+        title: 'Signup failed',
+        message:
+          error instanceof Error ? error.message : 'Please try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -114,7 +134,12 @@ export function SignupScreen({navigation}: Props) {
         placeholder="Repeat password"
       />
 
-      <Button label="Continue" onPress={onContinue} style={styles.cta} />
+      <Button
+        label="Submit application"
+        onPress={onSubmit}
+        loading={loading}
+        style={styles.cta}
+      />
 
       <View style={styles.footer}>
         <Text style={[styles.footerText, {color: theme.textMuted}]}>

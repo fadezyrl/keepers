@@ -2,12 +2,16 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
+import {AppState, AppStateStatus} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   cancelTripRequest,
+  changePasswordRequest,
+  deleteAccountRequest,
   fetchDirectory,
   fetchHome,
   fetchMe,
@@ -19,6 +23,7 @@ import {
   mapMeToProfile,
   markAllNotificationsReadRequest,
   markNotificationReadRequest,
+  resetPasswordWithTokenRequest,
   signupRequest,
   updateProfileRequest,
 } from '../api/keepersApi';
@@ -28,18 +33,17 @@ import {
   loadStoredAccessToken,
   setTokens,
 } from '../api/client';
-import {DEMO_OTP} from '../config/demoAuth';
-import {STORAGE_KEYS} from '../config/api';
 import {
-  announcements,
-  appInfo,
-  clubBrochure,
-  clubProtocols,
-  clubStory,
-  events,
-  safetyBriefing,
-  team,
-} from '../data/mock';
+  cachePolicy,
+  invalidateAfterNotificationMutation,
+  invalidateAfterProfileMutation,
+  invalidateAfterTripMutation,
+  queryKeys,
+  useCacheSession,
+} from '../cache';
+import {RESET_REDIRECT_URL} from '../config/linking';
+import {STORAGE_KEYS} from '../config/api';
+import {useNetworkStatus} from '../hooks/useNetworkStatus';
 import {
   AppNotification,
   ClubMember,
@@ -107,47 +111,45 @@ interface AppContextValue {
   unreadCount: number;
   isOffline: boolean;
   setOffline: (value: boolean) => void;
-  demoOtp: string;
+  recoveryAccessToken: string | null;
+  setRecoveryAccessToken: (token: string | null) => void;
   bootstrap: () => Promise<void>;
   refreshAppData: () => Promise<void>;
+  refreshNotificationsQuiet: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signup: (
     partial: Partial<UserProfile> & {email: string; password: string},
   ) => Promise<void>;
   logout: () => Promise<void>;
-  deleteAccount: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
   updateProfile: (next: UserProfile) => Promise<void>;
   changePassword: (
     currentPassword: string,
     nextPassword: string,
   ) => Promise<void>;
-  resetPassword: (email: string, nextPassword: string) => Promise<void>;
-  verifyOtp: (code: string) => boolean;
-  emailHasAccount: (email: string) => Promise<boolean>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  completePasswordReset: (
+    accessToken: string,
+    nextPassword: string,
+  ) => Promise<void>;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   getTrip: (id: string) => Trip | undefined;
+  upsertLocalTrip: (trip: Trip) => void;
+  removeLocalTrip: (tripId: string) => void;
   filterTrips: (
     filter: TripFilter,
     query: string,
     date?: string | null,
   ) => Trip[];
-  joinTrip: (id: string) => Promise<JoinResult>;
+  joinTrip: (id: string, requirementIds?: string[]) => Promise<JoinResult>;
   cancelRegistration: (id: string) => Promise<CancelResult>;
   hasPermission: (code: string) => boolean;
   hasRole: (code: string) => boolean;
-  events: typeof events;
-  announcements: typeof announcements;
-  team: typeof team;
   sponsors: Sponsor[];
   gallery: GalleryItem[];
-  clubStory: typeof clubStory;
   heroSlides: HeroSlide[];
   members: ClubMember[];
-  clubProtocols: typeof clubProtocols;
-  safetyBriefing: typeof safetyBriefing;
-  clubBrochure: typeof clubBrochure;
-  appInfo: typeof appInfo;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -189,7 +191,43 @@ function upsertTrip(list: Trip[], trip: Trip): Trip[] {
   return next;
 }
 
+function applySessionToState(
+  setters: {
+    setUser: (u: UserProfile) => void;
+    setTrips: (t: Trip[]) => void;
+    setNotifications: (n: AppNotification[]) => void;
+    setHeroSlides: (h: HeroSlide[]) => void;
+    setSponsors: (s: Sponsor[]) => void;
+    setGallery: (g: GalleryItem[]) => void;
+    setMembers: (m: ClubMember[]) => void;
+  },
+  data: {
+    me: any;
+    trips: Trip[];
+    notifications: AppNotification[];
+    home: Awaited<ReturnType<typeof fetchHome>>;
+    directory: ClubMember[];
+  },
+) {
+  setters.setUser(mapMeToProfile(data.me));
+  setters.setTrips(data.trips);
+  setters.setNotifications(data.notifications);
+  setters.setHeroSlides(data.home.heroSlides || []);
+  setters.setSponsors(data.home.sponsors || []);
+  setters.setGallery(data.home.gallery || []);
+  setters.setMembers(data.directory);
+}
+
 export function AppProvider({children}: {children: React.ReactNode}) {
+  const {
+    queryClient,
+    hydrated,
+    activeUserId,
+    setActiveUser,
+    clearAccountCache,
+    revalidateInBackground,
+  } = useCacheSession();
+
   const [bootstrapped, setBootstrapped] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('splash');
   const [displayMode, setDisplayModeState] = useState<DisplayMode>('light');
@@ -201,6 +239,29 @@ export function AppProvider({children}: {children: React.ReactNode}) {
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [isOffline, setOffline] = useState(false);
+  const [recoveryAccessToken, setRecoveryAccessTokenState] = useState<
+    string | null
+  >(null);
+
+  const setters = useMemo(
+    () => ({
+      setUser,
+      setTrips,
+      setNotifications,
+      setHeroSlides,
+      setSponsors,
+      setGallery,
+      setMembers,
+    }),
+    [],
+  );
+
+  const setRecoveryAccessToken = useCallback((token: string | null) => {
+    setRecoveryAccessTokenState(token);
+    if (token) {
+      setAuthMode('auth');
+    }
+  }, []);
 
   const unreadCount = useMemo(
     () => notifications.filter(n => !n.read).length,
@@ -217,42 +278,167 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     [user.roles],
   );
 
-  const loadSessionData = useCallback(async () => {
-    const [me, nextTrips, nextNotes, home, directory] = await Promise.all([
-      fetchMe(),
-      fetchTrips(),
-      fetchNotifications(),
-      fetchHome(),
-      fetchDirectory(),
-    ]);
-    setUser(mapMeToProfile(me));
-    setTrips(nextTrips);
-    setNotifications(nextNotes);
-    setHeroSlides(home.heroSlides || []);
-    setSponsors(home.sponsors || []);
-    setGallery(home.gallery || []);
-    setMembers(directory);
-    setOffline(false);
-  }, []);
+  const hydrateFromQueryCache = useCallback(
+    (userId: string): boolean => {
+      const me = queryClient.getQueryData(queryKeys.me(userId));
+      const nextTrips = queryClient.getQueryData<Trip[]>(
+        queryKeys.trips.list(userId, 'all'),
+      );
+      const nextNotes = queryClient.getQueryData<AppNotification[]>(
+        queryKeys.notifications(userId),
+      );
+      const home = queryClient.getQueryData<Awaited<ReturnType<typeof fetchHome>>>(
+        queryKeys.home(userId),
+      );
+      const directory = queryClient.getQueryData<ClubMember[]>(
+        queryKeys.members.directory(userId),
+      );
 
-  const refreshAppData = useCallback(async () => {
+      if (!me || !home) {
+        return false;
+      }
+
+      applySessionToState(setters, {
+        me,
+        trips: nextTrips || [],
+        notifications: nextNotes || [],
+        home,
+        directory: directory || [],
+      });
+      return true;
+    },
+    [queryClient, setters],
+  );
+
+  const loadSessionData = useCallback(
+    async (knownUserId?: string | null) => {
+      // Resolve user id: prefer known, else probe /me (uses network or throws)
+      let userId = knownUserId || activeUserId || '';
+
+      const me = await queryClient.fetchQuery({
+        queryKey: userId
+          ? queryKeys.me(userId)
+          : (['keepers', 'bootstrap', 'me'] as const),
+        queryFn: fetchMe,
+        ...cachePolicy.sensitive,
+      });
+
+      const profile = mapMeToProfile(me);
+      userId = profile.id;
+      await setActiveUser(userId);
+
+      // Re-key bootstrap me into user-scoped cache
+      queryClient.setQueryData(queryKeys.me(userId), me);
+
+      const [nextTrips, nextNotes, home, directory] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.trips.list(userId, 'all'),
+          queryFn: () => fetchTrips(),
+          ...cachePolicy.frequent,
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.notifications(userId),
+          queryFn: fetchNotifications,
+          ...cachePolicy.frequent,
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.home(userId),
+          queryFn: fetchHome,
+          ...cachePolicy.moderate,
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.members.directory(userId),
+          queryFn: () => fetchDirectory(),
+          ...cachePolicy.moderate,
+        }),
+      ]);
+
+      // Seed per-trip detail cache from list for instant detail screens
+      nextTrips.forEach(trip => {
+        const existing = queryClient.getQueryData(
+          queryKeys.trips.detail(userId, trip.id),
+        );
+        if (!existing) {
+          queryClient.setQueryData(
+            queryKeys.trips.detail(userId, trip.id),
+            trip,
+          );
+        }
+      });
+
+      applySessionToState(setters, {
+        me,
+        trips: nextTrips,
+        notifications: nextNotes,
+        home,
+        directory,
+      });
+      setOffline(false);
+      return userId;
+    },
+    [activeUserId, queryClient, setActiveUser, setters],
+  );
+
+  const silentRevalidate = useCallback(async () => {
+    const userId = user.id || activeUserId;
+    if (!userId || authMode !== 'app') {
+      return;
+    }
     try {
-      await loadSessionData();
+      await revalidateInBackground(userId);
+      await loadSessionData(userId);
     } catch (err) {
       if (isNetworkError(err)) {
         setOffline(true);
       }
-      const apiErr = err as ApiError;
-      if (apiErr?.code === 'UNAUTHORIZED' || apiErr?.code === 'FORBIDDEN') {
-        await clearTokens();
-        setAuthMode('auth');
-        setUser(EMPTY_USER);
+    }
+  }, [
+    activeUserId,
+    authMode,
+    loadSessionData,
+    revalidateInBackground,
+    user.id,
+  ]);
+
+  useNetworkStatus({
+    onOfflineChange: setOffline,
+    onReconnect: silentRevalidate,
+  });
+
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active') {
+        silentRevalidate();
+      }
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [silentRevalidate]);
+
+  const refreshAppData = useCallback(async () => {
+    try {
+      const userId = user.id || activeUserId;
+      if (userId) {
+        await revalidateInBackground(userId);
+      }
+      await loadSessionData(userId);
+    } catch (err) {
+      if (isNetworkError(err)) {
+        setOffline(true);
       }
       throw asError(err, 'Unable to refresh data.');
     }
-  }, [loadSessionData]);
+  }, [
+    activeUserId,
+    loadSessionData,
+    revalidateInBackground,
+    user.id,
+  ]);
 
   const bootstrap = useCallback(async () => {
+    if (!hydrated) {
+      return;
+    }
     try {
       const theme = await AsyncStorage.getItem(STORAGE_KEYS.theme);
       if (theme === 'dark' || theme === 'light') {
@@ -265,13 +451,47 @@ export function AppProvider({children}: {children: React.ReactNode}) {
         return;
       }
 
-      try {
-        await loadSessionData();
+      const cachedUserId = activeUserId;
+      const hadCache = cachedUserId
+        ? hydrateFromQueryCache(cachedUserId)
+        : false;
+
+      if (hadCache) {
+        // Instant UI from persistent cache; revalidate in background
         setAuthMode('app');
+        setBootstrapped(true);
+        loadSessionData(cachedUserId)
+          .then(uid => revalidateInBackground(uid))
+          .catch(err => {
+            if (isNetworkError(err)) {
+              setOffline(true);
+            } else {
+              const apiErr = err as ApiError;
+              const code = (apiErr?.code || '').toUpperCase();
+              if (
+                code === 'UNAUTHORIZED' ||
+                code === 'FORBIDDEN' ||
+                code.includes('AUTH') ||
+                code.includes('TOKEN')
+              ) {
+                clearTokens().then(() => {
+                  clearAccountCache(cachedUserId);
+                  setUser(EMPTY_USER);
+                  setAuthMode('auth');
+                });
+              }
+            }
+          });
+        return;
+      }
+
+      try {
+        await loadSessionData(cachedUserId);
+        setAuthMode('app');
+        revalidateInBackground().catch(() => undefined);
       } catch (err) {
         if (isNetworkError(err)) {
           setOffline(true);
-          // Keep token; show auth only if we have no session data yet
           setAuthMode('auth');
           return;
         }
@@ -284,6 +504,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
           code.includes('TOKEN')
         ) {
           await clearTokens();
+          await clearAccountCache(cachedUserId);
           setUser(EMPTY_USER);
         }
         setAuthMode('auth');
@@ -293,7 +514,20 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     } finally {
       setBootstrapped(true);
     }
-  }, [loadSessionData]);
+  }, [
+    activeUserId,
+    clearAccountCache,
+    hydrateFromQueryCache,
+    hydrated,
+    loadSessionData,
+    revalidateInBackground,
+  ]);
+
+  useEffect(() => {
+    if (hydrated && !bootstrapped) {
+      bootstrap();
+    }
+  }, [bootstrap, bootstrapped, hydrated]);
 
   const setDisplayMode = useCallback(async (mode: DisplayMode) => {
     setDisplayModeState(mode);
@@ -313,6 +547,10 @@ export function AppProvider({children}: {children: React.ReactNode}) {
           data.session.access_token,
           data.session.refresh_token,
         );
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.lastLoginEmail,
+          email.trim().toLowerCase(),
+        );
         const me = await fetchMe();
         const profile = mapMeToProfile(me);
         if ((profile.status || '').toLowerCase() === 'pending') {
@@ -321,21 +559,42 @@ export function AppProvider({children}: {children: React.ReactNode}) {
             'Your account is pending approval. You will be notified once an admin activates membership.',
           );
         }
-        setUser(profile);
+        await setActiveUser(profile.id);
+        queryClient.setQueryData(queryKeys.me(profile.id), me);
+
         const [nextTrips, nextNotes, home, directory] = await Promise.all([
-          fetchTrips(),
-          fetchNotifications(),
-          fetchHome(),
-          fetchDirectory(),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.trips.list(profile.id, 'all'),
+            queryFn: () => fetchTrips(),
+            ...cachePolicy.frequent,
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.notifications(profile.id),
+            queryFn: fetchNotifications,
+            ...cachePolicy.frequent,
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.home(profile.id),
+            queryFn: fetchHome,
+            ...cachePolicy.moderate,
+          }),
+          queryClient.fetchQuery({
+            queryKey: queryKeys.members.directory(profile.id),
+            queryFn: () => fetchDirectory(),
+            ...cachePolicy.moderate,
+          }),
         ]);
-        setTrips(nextTrips);
-        setNotifications(nextNotes);
-        setHeroSlides(home.heroSlides || []);
-        setSponsors(home.sponsors || []);
-        setGallery(home.gallery || []);
-        setMembers(directory);
+
+        applySessionToState(setters, {
+          me,
+          trips: nextTrips,
+          notifications: nextNotes,
+          home,
+          directory,
+        });
         setOffline(false);
         setAuthMode('app');
+        revalidateInBackground(profile.id).catch(() => undefined);
       } catch (err) {
         if (isNetworkError(err)) {
           setOffline(true);
@@ -352,7 +611,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
         throw asError(err, 'Sign in failed. Please try again.');
       }
     },
-    [],
+    [queryClient, revalidateInBackground, setActiveUser, setters],
   );
 
   const signup = useCallback(
@@ -394,8 +653,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     [],
   );
 
-  const logout = useCallback(async () => {
-    await clearTokens();
+  const resetLocalSession = useCallback(() => {
     setUser(EMPTY_USER);
     setTrips([]);
     setNotifications([]);
@@ -406,112 +664,244 @@ export function AppProvider({children}: {children: React.ReactNode}) {
     setAuthMode('auth');
   }, []);
 
-  const deleteAccount = useCallback(async () => {
-    await clearTokens();
-    setUser(EMPTY_USER);
-    setTrips([]);
-    setNotifications([]);
-    setHeroSlides([]);
-    setSponsors([]);
-    setGallery([]);
-    setMembers([]);
-    setAuthMode('auth');
-  }, []);
-
-  const updateProfile = useCallback(async (next: UserProfile) => {
+  const refreshNotificationsQuiet = useCallback(async () => {
+    const uid = user.id || activeUserId;
+    if (!uid) return;
     try {
-      const updated = await updateProfileRequest({
-        firstName: next.firstName,
-        lastName: next.lastName,
-        username: next.username,
-        phone: next.phone,
-        nationality: next.nationality,
-        gender: next.gender,
-        emergencyContact: next.emergencyContact,
-        avatar: next.avatar,
-        vehicle: next.vehicle,
-        social: next.social,
-        notificationPrefs: next.notificationPrefs,
-        privacy: next.privacy,
+      const nextNotes = await queryClient.fetchQuery({
+        queryKey: queryKeys.notifications(uid),
+        queryFn: fetchNotifications,
+        ...cachePolicy.frequent,
       });
-      setUser(mapMeToProfile(updated));
-      setOffline(false);
-    } catch (err) {
-      if (isNetworkError(err)) {
-        setOffline(true);
-      }
-      throw asError(err, 'Unable to update profile.');
+      setNotifications(nextNotes);
+    } catch {
+      // Quiet refresh — ignore offline / auth races.
     }
-  }, []);
+  }, [activeUserId, queryClient, user.id]);
 
-  const changePassword = useCallback(
-    async (_currentPassword: string, _nextPassword: string) => {
-      throw new Error(
-        'Use the forgot password email flow to reset your password.',
-      );
-    },
-    [],
-  );
+  const logout = useCallback(async () => {
+    const uid = user.id || activeUserId;
+    const email = (user.email || '').trim().toLowerCase();
+    if (email) {
+      await AsyncStorage.setItem(STORAGE_KEYS.lastLoginEmail, email);
+    }
+    try {
+      const {deactivatePushDevicesRequest} = await import('../api/keepersApi');
+      await deactivatePushDevicesRequest();
+    } catch {
+      // Best-effort token cleanup.
+    }
+    try {
+      const {disconnectChatSocket} = await import('../chat/chatSocket');
+      disconnectChatSocket();
+    } catch {
+      // Best-effort socket cleanup.
+    }
+    await clearTokens();
+    await clearAccountCache(uid);
+    resetLocalSession();
+  }, [
+    activeUserId,
+    clearAccountCache,
+    resetLocalSession,
+    user.email,
+    user.id,
+  ]);
 
-  const resetPassword = useCallback(
-    async (email: string, _nextPassword?: string) => {
+  const deleteAccount = useCallback(
+    async (password: string) => {
       try {
-        await forgotPasswordRequest(email.trim());
+        const uid = user.id || activeUserId;
+        await deleteAccountRequest(password);
+        await clearTokens();
+        await clearAccountCache(uid);
+        resetLocalSession();
       } catch (err) {
         if (isNetworkError(err)) {
           setOffline(true);
         }
-        throw asError(err, 'Unable to send reset email.');
+        throw asError(err, 'Unable to delete account.');
+      }
+    },
+    [activeUserId, clearAccountCache, resetLocalSession, user.id],
+  );
+
+  const updateProfile = useCallback(
+    async (next: UserProfile) => {
+      try {
+        const updated = await updateProfileRequest({
+          firstName: next.firstName,
+          lastName: next.lastName,
+          username: next.username,
+          phone: next.phone,
+          nationality: next.nationality,
+          gender: next.gender,
+          emergencyContact: next.emergencyContact,
+          avatar: next.avatar,
+          vehicle: next.vehicle,
+          social: next.social,
+          notificationPrefs: next.notificationPrefs,
+          privacy: next.privacy,
+        });
+        // PATCH /members/me returns member detail; /auth/me shape is also supported
+        const profile = mapMeToProfile({
+          ...updated,
+          avatar: updated.avatar || updated.avatarUrl || next.avatar || '',
+          vehicle: updated.vehicle || next.vehicle,
+        });
+        setUser(profile);
+        const uid = profile.id;
+        queryClient.setQueryData(queryKeys.me(uid), updated);
+        await invalidateAfterProfileMutation(queryClient, uid);
+        setOffline(false);
+      } catch (err) {
+        if (isNetworkError(err)) {
+          setOffline(true);
+        }
+        throw asError(err, 'Unable to update profile.');
+      }
+    },
+    [queryClient],
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, nextPassword: string) => {
+      try {
+        await changePasswordRequest(currentPassword, nextPassword);
+      } catch (err) {
+        if (isNetworkError(err)) {
+          setOffline(true);
+        }
+        throw asError(err, 'Unable to change password.');
       }
     },
     [],
   );
 
-  const verifyOtp = useCallback((code: string) => {
-    const trimmed = code.trim();
-    if (/^\d{4,}$/.test(trimmed)) {
-      return true;
-    }
-    return trimmed === DEMO_OTP;
-  }, []);
-
-  const emailHasAccount = useCallback(async (email: string) => {
+  const requestPasswordReset = useCallback(async (email: string) => {
     try {
-      await forgotPasswordRequest(email.trim());
-      return true;
+      await forgotPasswordRequest(email.trim(), RESET_REDIRECT_URL);
     } catch (err) {
       if (isNetworkError(err)) {
         setOffline(true);
-        throw asError(err, 'Network unavailable.');
       }
-      // Do not leak whether the account exists; treat as submitted.
-      return true;
+      throw asError(err, 'Unable to send reset email.');
     }
   }, []);
 
-  const markNotificationRead = useCallback((id: string) => {
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? {...n, read: true} : n)),
-    );
-    markNotificationReadRequest(id).catch(err => {
-      if (isNetworkError(err)) {
-        setOffline(true);
+  const completePasswordReset = useCallback(
+    async (accessToken: string, nextPassword: string) => {
+      try {
+        await resetPasswordWithTokenRequest(accessToken, nextPassword);
+        setRecoveryAccessToken(null);
+      } catch (err) {
+        if (isNetworkError(err)) {
+          setOffline(true);
+        }
+        throw asError(err, 'Unable to reset password.');
       }
-    });
-  }, []);
+    },
+    [setRecoveryAccessToken],
+  );
+
+  const markNotificationRead = useCallback(
+    (id: string) => {
+      setNotifications(prev =>
+        prev.map(n => (n.id === id ? {...n, read: true} : n)),
+      );
+      const uid = user.id || activeUserId;
+      if (uid) {
+        queryClient.setQueryData<AppNotification[]>(
+          queryKeys.notifications(uid),
+          old => (old || []).map(n => (n.id === id ? {...n, read: true} : n)),
+        );
+      }
+      markNotificationReadRequest(id)
+        .then(() => {
+          if (uid) {
+            return invalidateAfterNotificationMutation(queryClient, uid);
+          }
+        })
+        .catch(err => {
+          if (isNetworkError(err)) {
+            setOffline(true);
+          }
+        });
+    },
+    [activeUserId, queryClient, user.id],
+  );
 
   const markAllNotificationsRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({...n, read: true})));
-    markAllNotificationsReadRequest().catch(err => {
-      if (isNetworkError(err)) {
-        setOffline(true);
-      }
-    });
-  }, []);
+    const uid = user.id || activeUserId;
+    if (uid) {
+      queryClient.setQueryData<AppNotification[]>(
+        queryKeys.notifications(uid),
+        old => (old || []).map(n => ({...n, read: true})),
+      );
+    }
+    markAllNotificationsReadRequest()
+      .then(() => {
+        if (uid) {
+          return invalidateAfterNotificationMutation(queryClient, uid);
+        }
+      })
+      .catch(err => {
+        if (isNetworkError(err)) {
+          setOffline(true);
+        }
+      });
+  }, [activeUserId, queryClient, user.id]);
 
   const getTrip = useCallback(
-    (id: string) => trips.find(t => t.id === id),
-    [trips],
+    (id: string) => {
+      const fromState = trips.find(t => t.id === id);
+      if (fromState) return fromState;
+      const uid = user.id || activeUserId;
+      if (!uid) return undefined;
+      return queryClient.getQueryData<Trip>(queryKeys.trips.detail(uid, id));
+    },
+    [activeUserId, queryClient, trips, user.id],
+  );
+
+  const upsertLocalTrip = useCallback(
+    (trip: Trip) => {
+      setTrips(prev => upsertTrip(prev, trip));
+      const uid = user.id || activeUserId;
+      if (uid) {
+        queryClient.setQueryData(queryKeys.trips.detail(uid, trip.id), trip);
+        queryClient.setQueryData<Trip[]>(
+          queryKeys.trips.list(uid, 'all'),
+          old => (old ? upsertTrip(old, trip) : [trip]),
+        );
+      }
+    },
+    [activeUserId, queryClient, user.id],
+  );
+
+  const removeLocalTrip = useCallback(
+    (tripId: string) => {
+      setTrips(prev => prev.filter(t => t.id !== tripId));
+      const uid = user.id || activeUserId;
+      if (uid) {
+        queryClient.removeQueries({
+          queryKey: queryKeys.trips.detail(uid, tripId),
+        });
+        queryClient.setQueryData<Trip[]>(
+          queryKeys.trips.list(uid, 'all'),
+          old => (old ? old.filter(t => t.id !== tripId) : old),
+        );
+        queryClient.setQueryData<Trip[]>(
+          queryKeys.trips.organized(uid),
+          old => (old ? old.filter(t => t.id !== tripId) : old),
+        );
+        queryClient.setQueryData<Trip[]>(
+          queryKeys.trips.assigned(uid),
+          old => (old ? old.filter(t => t.id !== tripId) : old),
+        );
+      }
+    },
+    [activeUserId, queryClient, user.id],
   );
 
   const filterTrips = useCallback(
@@ -541,53 +931,75 @@ export function AppProvider({children}: {children: React.ReactNode}) {
           );
         }
 
+        // 'all' — callers that need upcoming/past should use tripPresentation helpers
         return true;
       });
     },
     [trips],
   );
 
-  const joinTrip = useCallback(async (id: string): Promise<JoinResult> => {
-    try {
-      const trip = await joinTripRequest(id);
-      setTrips(prev => upsertTrip(prev, trip));
+  const joinTrip = useCallback(
+    async (id: string, requirementIds: string[] = []): Promise<JoinResult> => {
       try {
-        const nextNotes = await fetchNotifications();
-        setNotifications(nextNotes);
-      } catch {
-        // non-fatal
+        const trip = await joinTripRequest(id, requirementIds);
+        upsertLocalTrip(trip);
+        const uid = user.id || activeUserId;
+        if (uid) {
+          await invalidateAfterTripMutation(queryClient, uid, id);
+          try {
+            const nextNotes = await queryClient.fetchQuery({
+              queryKey: queryKeys.notifications(uid),
+              queryFn: fetchNotifications,
+              staleTime: 0,
+            });
+            setNotifications(nextNotes);
+          } catch {
+            // non-fatal
+          }
+        }
+        setOffline(false);
+        return {
+          ok: true,
+          status: trip.status,
+          message:
+            trip.status === 'waitlist'
+              ? 'Trip is full. You have been added to the waiting list.'
+              : trip.status === 'pending'
+                ? 'Registration submitted and awaiting approval.'
+                : 'Registration confirmed. See you on the trail.',
+        };
+      } catch (err) {
+        if (isNetworkError(err)) {
+          setOffline(true);
+        }
+        const apiErr = err as ApiError;
+        return {
+          ok: false,
+          message: apiErr?.message || 'Unable to join this trip.',
+        };
       }
-      setOffline(false);
-      return {
-        ok: true,
-        status: trip.status,
-        message:
-          trip.status === 'waitlist'
-            ? 'Trip is full. You have been added to the waiting list.'
-            : 'Registration confirmed. See you on the trail.',
-      };
-    } catch (err) {
-      if (isNetworkError(err)) {
-        setOffline(true);
-      }
-      const apiErr = err as ApiError;
-      return {
-        ok: false,
-        message: apiErr?.message || 'Unable to join this trip.',
-      };
-    }
-  }, []);
+    },
+    [activeUserId, queryClient, upsertLocalTrip, user.id],
+  );
 
   const cancelRegistration = useCallback(
     async (id: string): Promise<CancelResult> => {
       try {
         const trip = await cancelTripRequest(id);
-        setTrips(prev => upsertTrip(prev, trip));
-        try {
-          const nextNotes = await fetchNotifications();
-          setNotifications(nextNotes);
-        } catch {
-          // non-fatal
+        upsertLocalTrip(trip);
+        const uid = user.id || activeUserId;
+        if (uid) {
+          await invalidateAfterTripMutation(queryClient, uid, id);
+          try {
+            const nextNotes = await queryClient.fetchQuery({
+              queryKey: queryKeys.notifications(uid),
+              queryFn: fetchNotifications,
+              staleTime: 0,
+            });
+            setNotifications(nextNotes);
+          } catch {
+            // non-fatal
+          }
         }
         setOffline(false);
         return {
@@ -606,7 +1018,7 @@ export function AppProvider({children}: {children: React.ReactNode}) {
         };
       }
     },
-    [],
+    [activeUserId, queryClient, upsertLocalTrip, user.id],
   );
 
   const value = useMemo(
@@ -621,38 +1033,33 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       unreadCount,
       isOffline,
       setOffline,
-      demoOtp: DEMO_OTP,
+      recoveryAccessToken,
+      setRecoveryAccessToken,
       bootstrap,
       refreshAppData,
+      refreshNotificationsQuiet,
       login,
       signup,
       logout,
       deleteAccount,
       updateProfile,
       changePassword,
-      resetPassword,
-      verifyOtp,
-      emailHasAccount,
+      requestPasswordReset,
+      completePasswordReset,
       markNotificationRead,
       markAllNotificationsRead,
       getTrip,
+      upsertLocalTrip,
+      removeLocalTrip,
       filterTrips,
       joinTrip,
       cancelRegistration,
       hasPermission,
       hasRole,
-      events,
-      announcements,
-      team,
       sponsors,
       gallery,
-      clubStory,
       heroSlides,
       members,
-      clubProtocols,
-      safetyBriefing,
-      clubBrochure,
-      appInfo,
     }),
     [
       bootstrapped,
@@ -664,20 +1071,23 @@ export function AppProvider({children}: {children: React.ReactNode}) {
       notifications,
       unreadCount,
       isOffline,
+      recoveryAccessToken,
       bootstrap,
       refreshAppData,
+      refreshNotificationsQuiet,
       login,
       signup,
       logout,
       deleteAccount,
       updateProfile,
       changePassword,
-      resetPassword,
-      verifyOtp,
-      emailHasAccount,
+      requestPasswordReset,
+      completePasswordReset,
       markNotificationRead,
       markAllNotificationsRead,
       getTrip,
+      upsertLocalTrip,
+      removeLocalTrip,
       filterTrips,
       joinTrip,
       cancelRegistration,

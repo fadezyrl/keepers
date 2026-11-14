@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "540730311833",
+    "project_id": "keepers-68d3e",
+    "storage_bucket": "keepers-68d3e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:540730311833:android:a1814f5486edef96e6e408",
+        "android_client_info": {
+          "package_name": "com.keepers"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC33yHUN6r3f4L3c21s6ErF-j3lsf4bHrM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

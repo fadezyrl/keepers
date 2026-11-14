@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   Dimensions,
   Linking,
@@ -15,21 +15,43 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {showAlert, showToast} from '../../alerts';
 import {
   Avatar,
+  BusyOverlay,
   Button,
   ConfirmModal,
   ErrorState,
   Icon,
+  LoadingState,
   RemoteImage,
   Screen,
   StatusPill,
+  VehicleReadinessSheet,
+  VideoPlayer,
 } from '../../components';
 import {useApp} from '../../context/AppContext';
+import {useCachedTrip} from '../../hooks/useCachedQueries';
 import {usePullToRefresh} from '../../hooks/usePullToRefresh';
 import {RootStackParamList} from '../../navigation/types';
 import {colors, spacing, typography, useThemeColors} from '../../theme';
 import {MembershipLevel, Participant, Trip} from '../../types';
+import {
+  openTripGroupChat,
+  openTripPrivateChat,
+} from '../../chat/chatApi';
+import {openTripInCalendar} from '../../utils/calendar';
+import {
+  canJoinTrip,
+  discoveryStatus,
+  discoveryStatusLabel,
+  formatCapacity,
+  formatSpotsLeft,
+  formatTripDate,
+  isCompletedAdventure,
+  isTripCancelled,
+  isTripFull,
+} from '../../utils/tripPresentation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripDetails'>;
 
@@ -40,20 +62,6 @@ const MEMBERSHIP_RANK: Record<MembershipLevel, number> = {
   Intermediate: 1,
   Advanced: 2,
 };
-
-function formatTripDate(date: string, time: string) {
-  const parsed = new Date(`${date}T${time}:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return `${date} · ${time}`;
-  }
-  return parsed.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 function membershipOk(userLevel: string, required: MembershipLevel) {
   if (!(userLevel in MEMBERSHIP_RANK)) {
@@ -83,22 +91,45 @@ function evaluateEligibility(trip: Trip, membership: string, completedTrips: num
 export function TripDetailsScreen({navigation, route}: Props) {
   const insets = useSafeAreaInsets();
   const theme = useThemeColors();
-  const {getTrip, joinTrip, cancelRegistration, user} = useApp();
-  const {refreshing, onRefresh} = usePullToRefresh();
-  const trip = getTrip(route.params.tripId);
+  const {
+    getTrip,
+    joinTrip,
+    cancelRegistration,
+    user,
+    upsertLocalTrip,
+    hasPermission,
+  } = useApp();
+  const cached = getTrip(route.params.tripId);
+  const tripQuery = useCachedTrip(route.params.tripId, cached);
+  const trip = tripQuery.data || cached;
+  const loadError =
+    !trip && tripQuery.isError
+      ? tripQuery.error instanceof Error
+        ? tripQuery.error.message
+        : 'Unable to load this trip.'
+      : null;
+  const loading = !trip && tripQuery.isLoading;
+
+  useEffect(() => {
+    if (tripQuery.data) {
+      upsertLocalTrip(tripQuery.data);
+    }
+  }, [tripQuery.data, upsertLocalTrip]);
+
+  const {refreshing, onRefresh} = usePullToRefresh(async () => {
+    await tripQuery.refetch();
+  });
 
   const [aboutOpen, setAboutOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [readinessSelectedIds, setReadinessSelectedIds] = useState<string[]>(
+    [],
+  );
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const slotsLeft = useMemo(() => {
-    if (!trip) {
-      return 0;
-    }
-    return Math.max(0, trip.maxParticipants - trip.registeredCount);
-  }, [trip]);
+  const [activeVideoUri, setActiveVideoUri] = useState<string | null>(null);
 
   const eligibility = useMemo(() => {
     if (!trip) {
@@ -107,14 +138,36 @@ export function TripDetailsScreen({navigation, route}: Props) {
     return evaluateEligibility(trip, user.membership, user.completedTrips);
   }, [trip, user.completedTrips, user.membership]);
 
+  const tripVideoKey = (trip?.videos || []).join('|');
+  useEffect(() => {
+    const videos = tripVideoKey ? tripVideoKey.split('|') : [];
+    if (videos.length === 0) {
+      setActiveVideoUri(null);
+      return;
+    }
+    setActiveVideoUri(prev =>
+      prev && videos.includes(prev) ? prev : videos[0],
+    );
+  }, [tripVideoKey]);
+
+  if (loading && !trip) {
+    return (
+      <Screen scroll>
+        <LoadingState />
+      </Screen>
+    );
+  }
+
   if (!trip) {
     return (
       <Screen scroll>
         <ErrorState
           title="Trip unavailable"
-          message="This adventure could not be found."
-          actionLabel="Back to Trips"
-          onAction={() => navigation.goBack()}
+          message={loadError || 'This adventure could not be found.'}
+          actionLabel="Retry"
+          onAction={() => {
+            tripQuery.refetch();
+          }}
         />
       </Screen>
     );
@@ -125,9 +178,16 @@ export function TripDetailsScreen({navigation, route}: Props) {
     trip.status === 'pending' ||
     trip.status === 'waitlist';
 
-  const isFull = trip.registeredCount >= trip.maxParticipants;
+  const isFull = isTripFull(trip);
+  const isPast = isCompletedAdventure(trip);
+  const isCancelled = isTripCancelled(trip);
+  const joinAllowed =
+    canJoinTrip(trip) && eligibility.eligible && !isRegistered;
+  const statusLabel = discoveryStatusLabel(discoveryStatus(trip));
   const hasAboutContent = Boolean(
-    trip.description?.trim() || trip.instructions?.trim(),
+    trip.description?.trim() ||
+      trip.instructions?.trim() ||
+      trip.routeSummary?.trim(),
   );
 
   const onShare = async () => {
@@ -148,6 +208,26 @@ export function TripDetailsScreen({navigation, route}: Props) {
     });
   };
 
+  const onAddToCalendar = async () => {
+    if (!trip) return;
+    const result = await openTripInCalendar({
+      title: trip.title,
+      date: trip.date,
+      time: trip.time,
+      location: trip.meetingPoint || trip.destination,
+      details: trip.description,
+    });
+    if (!result.ok) {
+      showAlert({
+        type: 'warning',
+        title: 'Calendar',
+        message: result.message,
+      });
+    } else {
+      showToast({type: 'success', message: result.message || 'Calendar updated'});
+    }
+  };
+
   const onOpenMaps = () => {
     const {latitude, longitude, label} = trip.location;
     const encoded = encodeURIComponent(label);
@@ -163,19 +243,33 @@ export function TripDetailsScreen({navigation, route}: Props) {
     });
   };
 
-  const onJoin = async () => {
+  const onJoinContinue = async (requirementIds: string[]) => {
+    setReadinessSelectedIds(requirementIds);
     setActionError(null);
     if (!eligibility.eligible) {
       setActionError(eligibility.message);
       return;
     }
+    if (!canJoinTrip(trip) || isFull) {
+      setActionError('No places remaining on this adventure.');
+      return;
+    }
+    if (busy) return;
     setBusy(true);
     try {
-      const result = await joinTrip(trip.id);
+      const result = await joinTrip(trip.id, requirementIds);
       if (!result.ok) {
+        // Keep sheet open and preserve selections on failure
         setActionError(result.message);
+        showAlert({
+          type: 'warning',
+          title: 'Unable to join',
+          message: result.message,
+        });
         return;
       }
+      setJoinOpen(false);
+      setReadinessSelectedIds([]);
       navigation.navigate('RegistrationConfirm', {
         tripId: trip.id,
         status: result.status || 'registered',
@@ -187,22 +281,14 @@ export function TripDetailsScreen({navigation, route}: Props) {
   };
 
   const ctaLabel = (() => {
-    if (trip.status === 'completed') {
-      return 'Adventure Completed';
-    }
-    if (trip.status === 'waitlist') {
-      return 'On Waiting List';
-    }
-    if (trip.status === 'registered' || trip.status === 'pending') {
-      return 'Registered';
-    }
-    if (!eligibility.eligible) {
-      return 'Not Eligible';
-    }
-    if (isFull) {
-      return 'Join Waiting List';
-    }
-    return 'Join Trip';
+    if (isPast) return 'Adventure Completed';
+    if (isCancelled) return 'Adventure Cancelled';
+    if (trip.status === 'waitlist') return 'On Waiting List';
+    if (trip.status === 'registered') return 'Confirmed';
+    if (trip.status === 'pending') return 'Pending Approval';
+    if (!eligibility.eligible) return 'Not Eligible';
+    if (isFull) return 'Fully Booked';
+    return 'Join Adventure';
   })();
 
   return (
@@ -254,9 +340,12 @@ export function TripDetailsScreen({navigation, route}: Props) {
             </View>
 
             <View style={styles.heroCopy}>
-              <StatusPill status={trip.status} tone="dark" />
+              <StatusPill status={trip.status} tone="dark" label={statusLabel} />
               <Text style={styles.heroTitle}>{trip.title}</Text>
               <Text style={styles.heroDestination}>{trip.destination}</Text>
+              <Text style={styles.heroDestination}>
+                {formatTripDate(trip.date, trip.time)}
+              </Text>
             </View>
           </View>
 
@@ -269,7 +358,7 @@ export function TripDetailsScreen({navigation, route}: Props) {
               <Avatar uri={trip.organizer.avatar} size={52} />
               <View style={styles.organizerCopy}>
                 <Text style={[styles.organizerLabel, {color: theme.textMuted}]}>
-                  Organizer
+                  Organized by Marshall
                 </Text>
                 <Text style={[styles.organizerName, {color: theme.text}]}>
                   {trip.organizer.name}
@@ -312,20 +401,11 @@ export function TripDetailsScreen({navigation, route}: Props) {
             />
             <InfoRow
               icon="users"
-              label="Registered members"
-              value={`${trip.registeredCount}`}
+              label="Capacity"
+              value={formatCapacity(trip)}
+              detail={formatSpotsLeft(trip)}
               actionLabel="View"
               onAction={() => setMembersOpen(true)}
-            />
-            <InfoRow
-              icon="users"
-              label="Total capacity"
-              value={`${trip.maxParticipants}`}
-              detail={
-                slotsLeft === 0
-                  ? 'No slots remaining'
-                  : `${slotsLeft} slots remaining`
-              }
             />
             <InfoRow icon="car" label="Trip type" value={trip.tripType} />
             <InfoRow
@@ -336,6 +416,86 @@ export function TripDetailsScreen({navigation, route}: Props) {
               onAction={onOpenMaps}
               last
             />
+            <Button
+              label="Add to Phone Calendar"
+              variant="secondary"
+              onPress={onAddToCalendar}
+              style={{marginTop: spacing.md}}
+            />
+
+            {trip.status === 'registered' ||
+            trip.organizerId === user.id ||
+            hasPermission('trips.manage') ||
+            hasPermission('chat.moderate') ? (
+              <View style={{marginTop: spacing.md, gap: spacing.sm}}>
+                <Button
+                  label="Trip group chat"
+                  onPress={async () => {
+                    try {
+                      const convo = await openTripGroupChat(trip.id);
+                      navigation.navigate('ChatThread', {
+                        conversationId: convo.id,
+                        title: trip.title,
+                      });
+                    } catch (err) {
+                      showAlert({
+                        type: 'error',
+                        title: 'Chat unavailable',
+                        message:
+                          err && typeof err === 'object' && 'message' in err
+                            ? String((err as {message: string}).message)
+                            : 'Unable to open group chat.',
+                      });
+                    }
+                  }}
+                />
+                {trip.status === 'registered' &&
+                trip.organizerId &&
+                trip.organizerId !== user.id ? (
+                  <Button
+                    label="Message Marshall"
+                    variant="secondary"
+                    onPress={async () => {
+                      try {
+                        const convo = await openTripPrivateChat(trip.id);
+                        navigation.navigate('ChatThread', {
+                          conversationId: convo.id,
+                          title: trip.title,
+                        });
+                      } catch (err) {
+                        showAlert({
+                          type: 'error',
+                          title: 'Private chat unavailable',
+                          message:
+                            err && typeof err === 'object' && 'message' in err
+                              ? String((err as {message: string}).message)
+                              : 'Unable to open private chat.',
+                        });
+                      }
+                    }}
+                  />
+                ) : null}
+              </View>
+            ) : null}
+
+            {trip.videos && trip.videos.length > 0 ? (
+              <View style={{marginTop: spacing.md, gap: spacing.sm}}>
+                {trip.videos.map((url, index) => (
+                  <VideoPlayer
+                    key={url}
+                    uri={url}
+                    label={
+                      trip.videos!.length === 1
+                        ? 'Trip video'
+                        : `Trip video ${index + 1}`
+                    }
+                    active={activeVideoUri === url}
+                    onActivate={() => setActiveVideoUri(url)}
+                    style={{marginTop: 0}}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.aboutBand}>
@@ -372,6 +532,12 @@ export function TripDetailsScreen({navigation, route}: Props) {
                     {trip.description?.trim() ? (
                       <Text style={styles.aboutCopy}>{trip.description}</Text>
                     ) : null}
+                    {trip.routeSummary?.trim() ? (
+                      <View style={styles.instructionsBlock}>
+                        <Text style={styles.instructionsLabel}>Itinerary</Text>
+                        <Text style={styles.aboutCopy}>{trip.routeSummary}</Text>
+                      </View>
+                    ) : null}
                     {trip.instructions?.trim() ? (
                       <View style={styles.instructionsBlock}>
                         <Text style={styles.instructionsLabel}>
@@ -380,13 +546,48 @@ export function TripDetailsScreen({navigation, route}: Props) {
                         <Text style={styles.aboutCopy}>{trip.instructions}</Text>
                       </View>
                     ) : null}
+                    {trip.vehicleRequirements?.trim() ? (
+                      <View style={styles.instructionsBlock}>
+                        <Text style={styles.instructionsLabel}>
+                          Vehicle requirements
+                        </Text>
+                        <Text style={styles.aboutCopy}>
+                          {trip.vehicleRequirements}
+                        </Text>
+                      </View>
+                    ) : null}
                   </>
                 )}
               </View>
             ) : null}
           </View>
 
-          {!eligibility.eligible && !isRegistered && trip.status !== 'completed' ? (
+          {trip.gallery && trip.gallery.length > 0 ? (
+            <View style={styles.gallerySection}>
+              <Text style={[styles.galleryTitle, {color: theme.text}]}>
+                {isPast ? 'Adventure memories' : 'Trip photos'}
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.galleryRow}>
+                {trip.gallery.map((uri, index) => (
+                  <Pressable
+                    key={`${uri}-${index}`}
+                    onPress={() =>
+                      navigation.navigate('GalleryViewer', {
+                        images: trip.gallery,
+                        index,
+                      })
+                    }>
+                    <RemoteImage uri={uri} style={styles.galleryImage} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {!eligibility.eligible && !isRegistered && !isPast && !isCancelled ? (
             <View
               style={[
                 styles.eligibilityBanner,
@@ -425,7 +626,7 @@ export function TripDetailsScreen({navigation, route}: Props) {
               paddingBottom: Math.max(insets.bottom, spacing.md),
             },
           ]}>
-          {isRegistered ? (
+          {isRegistered && !isPast && !isCancelled ? (
             <>
               <Button label={ctaLabel} onPress={() => undefined} disabled />
               <Button
@@ -435,12 +636,24 @@ export function TripDetailsScreen({navigation, route}: Props) {
                 style={{marginTop: spacing.sm}}
               />
             </>
+          ) : isPast || isCancelled ? (
+            <Button label={ctaLabel} onPress={() => undefined} disabled />
           ) : (
             <Button
               label={ctaLabel}
-              onPress={onJoin}
+              onPress={() => {
+                if (!joinAllowed) {
+                  if (isFull) {
+                    setActionError('No places remaining on this adventure.');
+                  } else if (!eligibility.eligible) {
+                    setActionError(eligibility.message);
+                  }
+                  return;
+                }
+                setJoinOpen(true);
+              }}
               loading={busy}
-              disabled={trip.status === 'completed' || !eligibility.eligible}
+              disabled={!joinAllowed}
             />
           )}
         </View>
@@ -453,10 +666,23 @@ export function TripDetailsScreen({navigation, route}: Props) {
         onClose={() => setMembersOpen(false)}
       />
 
+      <VehicleReadinessSheet
+        visible={joinOpen}
+        submitting={busy}
+        initialSelectedIds={readinessSelectedIds}
+        onCancel={() => {
+          if (busy) return;
+          setJoinOpen(false);
+        }}
+        onContinue={ids => {
+          void onJoinContinue(ids);
+        }}
+      />
+
       <ConfirmModal
         visible={cancelOpen}
         title="Cancel registration?"
-        message="You will lose your reserved slot for this adventure."
+        message="You will lose your reserved place on this adventure."
         confirmLabel="Cancel Registration"
         danger
         onCancel={() => setCancelOpen(false)}
@@ -474,6 +700,7 @@ export function TripDetailsScreen({navigation, route}: Props) {
           }
         }}
       />
+      <BusyOverlay visible={busy} message="Updating registration…" />
     </Screen>
   );
 }
@@ -592,6 +819,28 @@ function MembersModal({
                     <Text style={[styles.memberVehicle, {color: theme.textMuted}]}>
                       {member.vehicle}
                     </Text>
+                  ) : null}
+                  {member.readinessChecklist?.length ? (
+                    <View style={styles.readinessBlock}>
+                      <Text
+                        style={[styles.readinessTitle, {color: theme.textMuted}]}>
+                        Vehicle readiness
+                      </Text>
+                      {member.readinessChecklist.map(item => (
+                        <Text
+                          key={item.id}
+                          style={[
+                            styles.readinessItem,
+                            {
+                              color: item.selected
+                                ? theme.text
+                                : theme.textMuted,
+                            },
+                          ]}>
+                          {item.selected ? '✓' : '○'} {item.label}
+                        </Text>
+                      ))}
+                    </View>
                   ) : null}
                 </View>
               </View>
@@ -741,6 +990,24 @@ const styles = StyleSheet.create({
     ...typography.label,
     letterSpacing: 1.8,
   },
+  gallerySection: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  galleryTitle: {
+    ...typography.title,
+    fontSize: 18,
+    marginBottom: spacing.md,
+  },
+  galleryRow: {
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
+  },
+  galleryImage: {
+    width: 148,
+    height: 110,
+  },
   aboutBand: {
     backgroundColor: colors.black,
     paddingHorizontal: spacing.lg,
@@ -882,5 +1149,19 @@ const styles = StyleSheet.create({
   memberVehicle: {
     ...typography.caption,
     marginTop: 2,
+  },
+  readinessBlock: {
+    marginTop: spacing.sm,
+    gap: 2,
+  },
+  readinessTitle: {
+    ...typography.caption,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  readinessItem: {
+    ...typography.caption,
+    lineHeight: 18,
   },
 });

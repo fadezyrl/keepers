@@ -5,17 +5,12 @@ export type AuthStackParamList = {
   Login: undefined;
   Signup: undefined;
   ForgotPassword: undefined;
-  Otp: {
-    email: string;
-    mode: 'signup' | 'reset';
-    profile?: Partial<UserProfile> & {email: string; password: string};
-  };
-  ResetPassword: {email: string};
+  ResetPassword: {accessToken?: string; email?: string} | undefined;
 };
 
 export type MainTabParamList = {
   Home: undefined;
-  Trips: undefined;
+  Trips: {tab?: 'upcoming' | 'calendar' | 'mine'} | undefined;
   Settings: undefined;
   About: undefined;
 };
@@ -29,6 +24,7 @@ export type RootStackParamList = {
     message: string;
   };
   Notifications: undefined;
+  NotificationPreferences: undefined;
   EditProfile: undefined;
   GalleryViewer: {images: string[]; index: number};
   Legal: {type: 'terms' | 'privacy'};
@@ -42,6 +38,12 @@ export type RootStackParamList = {
   MarshallHub: undefined;
   CreateDrive: undefined;
   DriveParticipants: {tripId: string};
+  ManageTripMedia: {tripId: string};
+  ChatInbox: undefined;
+  ChatThread: {conversationId: string; title?: string};
   RateMember: {tripId: string; memberId: string; memberName: string};
   MarshallUpgrades: undefined;
+  MyProgress: undefined;
+  MyAdventureHistory: undefined;
+  MyTripPerformance: {tripId: string};
 };

@@ -33,6 +33,7 @@ local.properties
 .cxx/
 *.keystore
 !debug.keystore
+keystore.properties
 .kotlin/
 
 # node.js
@@ -40,6 +41,17 @@ local.properties
 node_modules/
 npm-debug.log
 yarn-error.log
+
+# Env (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# Firebase Admin / Apple signing secrets (never commit)
+**/firebase-service-account*.json
+**/*.p8
+**/*.p12
+ios/Pods/
 
 # fastlane
 #

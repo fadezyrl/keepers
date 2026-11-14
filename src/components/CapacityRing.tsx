@@ -8,6 +8,8 @@ interface CapacityRingProps {
   max: number;
   size?: number;
   tone?: 'light' | 'dark';
+  /** `fraction` → "12/20"; `count` → "12" */
+  labelMode?: 'fraction' | 'count';
 }
 
 export function CapacityRing({
@@ -15,6 +17,7 @@ export function CapacityRing({
   max,
   size = 52,
   tone = 'light',
+  labelMode = 'fraction',
 }: CapacityRingProps) {
   const stroke = 3;
   const radius = (size - stroke) / 2;
@@ -24,6 +27,8 @@ export function CapacityRing({
   const track = dark ? 'rgba(243,240,234,0.2)' : colors.greige;
   const fill = dark ? colors.ivory : colors.black;
   const label = dark ? colors.ivory : colors.black;
+  const value =
+    labelMode === 'count' ? String(registered || 0) : `${registered}/${max}`;
 
   return (
     <View style={{width: size, height: size, alignItems: 'center', justifyContent: 'center'}}>
@@ -49,8 +54,15 @@ export function CapacityRing({
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </Svg>
-      <Text style={[styles.value, {color: label, fontSize: size * 0.22}]}>
-        {registered}/{max}
+      <Text
+        style={[
+          styles.value,
+          {
+            color: label,
+            fontSize: size * (labelMode === 'count' ? 0.28 : 0.22),
+          },
+        ]}>
+        {value}
       </Text>
     </View>
   );

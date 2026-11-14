@@ -1,7 +1,5 @@
 import React from 'react';
-import {Modal, StyleSheet, Text, View} from 'react-native';
-import {radii, spacing, typography, useThemeColors} from '../theme';
-import {Button} from './Button';
+import {AlertDialog} from '../alerts/AlertDialog';
 
 interface ConfirmModalProps {
   visible: boolean;
@@ -10,10 +8,16 @@ interface ConfirmModalProps {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  children?: React.ReactNode;
 }
 
+/**
+ * Local controlled confirm dialog (e.g. forms with embedded fields).
+ * Prefer `useAlert().showConfirm` / `showConfirm()` for simple confirmations.
+ */
 export function ConfirmModal({
   visible,
   title,
@@ -21,72 +25,32 @@ export function ConfirmModal({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   danger,
+  loading = false,
   onConfirm,
   onCancel,
+  children,
 }: ConfirmModalProps) {
-  const theme = useThemeColors();
-
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.backdrop}>
-        <View
-          style={[
-            styles.card,
-            {backgroundColor: theme.surface, borderColor: theme.border},
-          ]}>
-          <Text style={[styles.title, {color: theme.text}]}>{title}</Text>
-          <Text style={[styles.message, {color: theme.textMuted}]}>
-            {message}
-          </Text>
-          <View style={styles.actions}>
-            <Button
-              label={cancelLabel}
-              onPress={onCancel}
-              variant="ghost"
-              style={styles.btn}
-            />
-            <Button
-              label={confirmLabel}
-              onPress={onConfirm}
-              variant={danger ? 'danger' : 'primary'}
-              style={styles.btn}
-            />
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <AlertDialog
+      visible={visible}
+      tone={danger ? 'warning' : 'confirm'}
+      title={title}
+      message={message}
+      loading={loading}
+      onRequestClose={onCancel}
+      buttons={[
+        {
+          label: cancelLabel,
+          variant: 'ghost',
+          onPress: onCancel,
+        },
+        {
+          label: confirmLabel,
+          variant: danger ? 'danger' : 'primary',
+          onPress: onConfirm,
+        },
+      ]}>
+      {children}
+    </AlertDialog>
   );
 }
-
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(17, 17, 16, 0.78)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 400,
-    borderRadius: radii.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: spacing.lg,
-  },
-  title: {
-    ...typography.title,
-    fontSize: 18,
-  },
-  message: {
-    ...typography.subtitle,
-    marginTop: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  btn: {
-    flex: 1,
-  },
-});

@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
-import {Alert, StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {showAlert} from '../../alerts';
 import {Button, Input, Screen} from '../../components';
 import {useApp} from '../../context/AppContext';
 import {AuthStackParamList} from '../../navigation/types';
@@ -11,7 +12,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 
 export function ForgotPasswordScreen({navigation}: Props) {
   const theme = useThemeColors();
-  const {emailHasAccount} = useApp();
+  const {requestPasswordReset} = useApp();
   const [email, setEmail] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(false);
@@ -24,17 +25,22 @@ export function ForgotPasswordScreen({navigation}: Props) {
     }
     setLoading(true);
     try {
-      await emailHasAccount(email.trim());
-      Alert.alert(
-        'Check your email',
-        'If an account exists for this address, a password reset link has been sent.',
-        [{text: 'Back to Sign In', onPress: () => navigation.navigate('Login')}],
-      );
+      await requestPasswordReset(email.trim());
+      showAlert({
+        type: 'info',
+        title: 'Check your email',
+        message:
+          'If an account exists for this address, a password reset link has been sent. Open the link on this device to choose a new password.',
+        buttonText: 'Back to Sign In',
+        onClose: () => navigation.navigate('Login'),
+      });
     } catch (error) {
-      Alert.alert(
-        'Reset failed',
-        error instanceof Error ? error.message : 'Please try again.',
-      );
+      showAlert({
+        type: 'error',
+        title: 'Reset failed',
+        message:
+          error instanceof Error ? error.message : 'Please try again.',
+      });
     } finally {
       setLoading(false);
     }
@@ -48,8 +54,8 @@ export function ForgotPasswordScreen({navigation}: Props) {
         </Text>
         <Text style={[styles.heading, {color: theme.text}]}>Reset password</Text>
         <Text style={[styles.sub, {color: theme.textMuted}]}>
-          Enter your membership email. We will send a verification code to
-          continue.
+          Enter your membership email. We will send a secure reset link that opens
+          this app.
         </Text>
       </View>
 
@@ -64,7 +70,7 @@ export function ForgotPasswordScreen({navigation}: Props) {
         placeholder="you@domain.com"
       />
 
-      <Button label="Send Code" onPress={onSubmit} loading={loading} />
+      <Button label="Send reset link" onPress={onSubmit} loading={loading} />
       <Button
         label="Back to Sign In"
         onPress={() => navigation.navigate('Login')}
@@ -78,21 +84,10 @@ export function ForgotPasswordScreen({navigation}: Props) {
 const styles = StyleSheet.create({
   top: {
     marginTop: spacing.xl,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
-  kicker: {
-    ...typography.label,
-    marginBottom: spacing.sm,
-  },
-  heading: {
-    ...typography.hero,
-    fontSize: 28,
-  },
-  sub: {
-    ...typography.subtitle,
-    marginTop: spacing.sm,
-  },
-  back: {
-    marginTop: spacing.sm,
-  },
+  kicker: {...typography.label},
+  heading: {...typography.hero, fontSize: 30, marginTop: spacing.xs},
+  sub: {...typography.body, marginTop: spacing.sm, lineHeight: 22},
+  back: {marginTop: spacing.sm},
 });

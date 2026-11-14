@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Image, StyleSheet, View} from 'react-native';
 import {useThemeColors} from '../theme';
 import {Icon} from './Icon';
@@ -11,6 +11,10 @@ interface AvatarProps {
 export function Avatar({uri, size = 40}: AvatarProps) {
   const theme = useThemeColors();
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
 
   return (
     <View

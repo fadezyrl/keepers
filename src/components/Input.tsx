@@ -7,6 +7,7 @@ import {
   TextInputProps,
   View,
 } from 'react-native';
+import {useEnsureInputVisible} from '../context/ScreenKeyboardContext';
 import {colors, spacing, typography, useThemeColors} from '../theme';
 import {Icon, IconName} from './Icon';
 
@@ -15,6 +16,8 @@ interface InputProps extends TextInputProps {
   error?: string;
   icon?: IconName;
   isPassword?: boolean;
+  /** Shows a * next to the label when true */
+  required?: boolean;
 }
 
 export function Input({
@@ -22,16 +25,23 @@ export function Input({
   error,
   icon,
   isPassword,
+  required,
   style,
   ...rest
 }: InputProps) {
   const theme = useThemeColors();
-  const [secure, setSecure] = useState(!!isPassword);
+  const [secure, setSecure] = useState(!!isPassword || !!rest.secureTextEntry);
   const [focused, setFocused] = useState(false);
+  const {fieldRef, ensureVisible, onBlurEnsure} = useEnsureInputVisible();
 
   return (
-    <View style={styles.wrap}>
-      <Text style={[styles.label, {color: theme.textMuted}]}>{label}</Text>
+    <View ref={fieldRef} style={styles.wrap} collapsable={false}>
+      <Text style={[styles.label, {color: theme.textMuted}]}>
+        {label}
+        {required ? (
+          <Text style={{color: theme.text}}> *</Text>
+        ) : null}
+      </Text>
       <View
         style={[
           styles.field,
@@ -47,20 +57,26 @@ export function Input({
         {icon ? <Icon name={icon} size={16} color={theme.textMuted} /> : null}
         <TextInput
           {...rest}
-          secureTextEntry={secure}
+          secureTextEntry={isPassword ? secure : rest.secureTextEntry}
           placeholderTextColor={theme.textMuted}
           onFocus={e => {
             setFocused(true);
+            ensureVisible();
             rest.onFocus?.(e);
           }}
           onBlur={e => {
             setFocused(false);
+            onBlurEnsure();
             rest.onBlur?.(e);
           }}
           style={[styles.input, {color: theme.text}, style]}
         />
         {isPassword ? (
-          <Pressable onPress={() => setSecure(s => !s)} hitSlop={10}>
+          <Pressable
+            onPress={() => setSecure(s => !s)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={secure ? 'Show password' : 'Hide password'}>
             <Icon
               name={secure ? 'eye' : 'eye-off'}
               size={16}

@@ -3,8 +3,9 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {AppHeader, Icon, Screen} from '../../components';
+import {AppHeader, Icon, RemoteImage, Screen} from '../../components';
 import {APP_DISPLAY_NAME, getAppVersion} from '../../config/appIdentity';
+import {useCachedEvents} from '../../hooks/useCachedQueries';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
 
@@ -29,11 +30,19 @@ export function AboutScreen() {
   const theme = useThemeColors();
   const insets = useSafeAreaInsets();
   const version = getAppVersion();
+  const eventsQuery = useCachedEvents();
+  const events = eventsQuery.data || [];
   const tabClearance =
     TAB_BAR_HEIGHT + Math.max(insets.bottom, TAB_BAR_MIN_OFFSET) + spacing.md;
 
   return (
-    <Screen scroll padded={false} edges={['top']}>
+    <Screen
+      scroll
+      padded={false}
+      edges={['top']}
+      onRefresh={async () => {
+        await eventsQuery.refetch();
+      }}>
       <AppHeader />
       <View style={[styles.body, {paddingBottom: tabClearance}]}>
         <Text style={[styles.heading, {color: theme.text}]}>About us</Text>
@@ -68,6 +77,38 @@ export function AboutScreen() {
           ))}
         </View>
 
+        {events.length > 0 ? (
+          <View style={styles.events}>
+            <Text style={[styles.eventsHeading, {color: theme.text}]}>
+              Upcoming events
+            </Text>
+            {events.map(event => (
+              <View
+                key={event.id}
+                style={[
+                  styles.eventCard,
+                  {borderColor: theme.border, backgroundColor: theme.surface},
+                ]}>
+                {event.image ? (
+                  <RemoteImage uri={event.image} style={styles.eventImage} />
+                ) : null}
+                <Text style={[styles.eventTitle, {color: theme.text}]}>
+                  {event.title}
+                </Text>
+                <Text style={[styles.eventMeta, {color: theme.textMuted}]}>
+                  {event.date}
+                  {event.location ? ` · ${event.location}` : ''}
+                </Text>
+                {event.description ? (
+                  <Text style={[styles.eventBody, {color: theme.textMuted}]}>
+                    {event.description}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.spacer} />
 
         <View style={styles.versionBlock}>
@@ -98,6 +139,37 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing.sm,
+  },
+  events: {
+    marginTop: spacing.xl,
+    gap: spacing.sm,
+  },
+  eventsHeading: {
+    ...typography.title,
+    fontSize: 18,
+    marginBottom: spacing.sm,
+  },
+  eventCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  eventImage: {
+    width: '100%',
+    height: 140,
+    marginBottom: spacing.sm,
+  },
+  eventTitle: {
+    ...typography.title,
+    fontSize: 16,
+  },
+  eventMeta: {
+    ...typography.caption,
+    marginTop: 4,
+  },
+  eventBody: {
+    ...typography.body,
+    marginTop: spacing.sm,
   },
   row: {
     height: 80,

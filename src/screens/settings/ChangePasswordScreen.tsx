@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
-import {Alert, StyleSheet, Text} from 'react-native';
+import {StyleSheet, Text} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {showAlert} from '../../alerts';
 import {BackHeader, Button, Input, Screen} from '../../components';
 import {useApp} from '../../context/AppContext';
 import {RootStackParamList} from '../../navigation/types';
@@ -40,14 +41,20 @@ export function ChangePasswordScreen({navigation}: Props) {
     setSaving(true);
     try {
       await changePassword(currentPassword, password);
-      Alert.alert('Password updated', 'Your password has been changed.', [
-        {text: 'Done', onPress: () => navigation.goBack()},
-      ]);
+      showAlert({
+        type: 'success',
+        title: 'Password updated',
+        message: 'Your password has been changed.',
+        buttonText: 'Done',
+        onClose: () => navigation.goBack(),
+      });
     } catch (error) {
-      Alert.alert(
-        'Unable to update',
-        error instanceof Error ? error.message : 'Please try again.',
-      );
+      showAlert({
+        type: 'error',
+        title: 'Unable to update',
+        message:
+          error instanceof Error ? error.message : 'Please try again.',
+      });
     } finally {
       setSaving(false);
     }

@@ -1,16 +1,17 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {spacing, typography, useThemeColors} from '../theme';
-import {TripFilter} from '../types';
+import {TripsTab} from '../types';
 
-const options: {key: TripFilter; label: string}[] = [
-  {key: 'all', label: 'All Trips'},
-  {key: 'joined', label: 'Joined Trips'},
+const options: {key: TripsTab; label: string}[] = [
+  {key: 'upcoming', label: 'Upcoming'},
+  {key: 'calendar', label: 'Calendar'},
+  {key: 'mine', label: 'My Trips'},
 ];
 
 interface FilterChipsProps {
-  value: TripFilter;
-  onChange: (value: TripFilter) => void;
+  value: TripsTab;
+  onChange: (value: TripsTab) => void;
 }
 
 export function FilterChips({value, onChange}: FilterChipsProps) {
@@ -26,10 +27,8 @@ export function FilterChips({value, onChange}: FilterChipsProps) {
             onPress={() => onChange(option.key)}
             accessibilityRole="tab"
             accessibilityState={{selected: active}}
-            style={[
-              styles.chip,
-              active && {borderBottomColor: theme.text},
-            ]}>
+            accessibilityLabel={option.label}
+            style={[styles.chip, active && {borderBottomColor: theme.text}]}>
             <Text
               style={[
                 styles.label,
@@ -63,6 +62,7 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.label,
-    letterSpacing: 2,
+    letterSpacing: 1.4,
+    fontSize: 10,
   },
 });

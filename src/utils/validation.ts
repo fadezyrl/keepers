@@ -71,10 +71,16 @@ export function validateForgotPassword(email: string): FieldErrors {
   return errors;
 }
 
-export function validateOtp(code: string): FieldErrors {
+export function validateResetPassword(
+  password: string,
+  confirmPassword: string,
+): FieldErrors {
   const errors: FieldErrors = {};
-  if (!/^\d{4}$/.test(code.trim())) {
-    errors.otp = 'Enter the 4-digit code';
+  if (!required(password) || !isValidPassword(password)) {
+    errors.password = 'Password must be at least 8 characters';
+  }
+  if (confirmPassword !== password) {
+    errors.confirmPassword = 'Passwords do not match';
   }
   return errors;
 }

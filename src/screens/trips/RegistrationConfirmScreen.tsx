@@ -1,17 +1,53 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {Button, Icon, Screen} from '../../components';
+import {showAlert, showToast} from '../../alerts';
+import {Button, Icon, LoadingState, Screen} from '../../components';
 import {useApp} from '../../context/AppContext';
+import {useCachedTrip} from '../../hooks/useCachedQueries';
 import {RootStackParamList} from '../../navigation/types';
 import {radii, spacing, typography, useThemeColors} from '../../theme';
+import {openTripInCalendar} from '../../utils/calendar';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RegistrationConfirm'>;
 
 export function RegistrationConfirmScreen({navigation, route}: Props) {
   const theme = useThemeColors();
   const {getTrip} = useApp();
-  const trip = getTrip(route.params.tripId);
+  const cached = getTrip(route.params.tripId);
+  const tripQuery = useCachedTrip(route.params.tripId, cached);
+  const trip = tripQuery.data || cached;
+  const [calendarBusy, setCalendarBusy] = useState(false);
+
+  const addToCalendar = async () => {
+    if (!trip) return;
+    setCalendarBusy(true);
+    const result = await openTripInCalendar({
+      title: trip.title,
+      date: trip.date,
+      time: trip.time,
+      location: trip.meetingPoint || trip.destination,
+      details: trip.description,
+    });
+    setCalendarBusy(false);
+    if (!result.ok) {
+      showAlert({
+        type: 'warning',
+        title: 'Calendar',
+        message: result.message,
+      });
+    } else {
+      showToast({type: 'success', message: result.message || 'Calendar updated'});
+    }
+  };
+
+  if (!trip && tripQuery.isLoading) {
+    return (
+      <Screen>
+        <LoadingState />
+      </Screen>
+    );
+  }
 
   return (
     <Screen scroll>
@@ -51,6 +87,15 @@ export function RegistrationConfirmScreen({navigation, route}: Props) {
             </Text>
           </View>
         ) : null}
+        {trip && route.params.status !== 'waitlist' ? (
+          <Button
+            label="Add to Phone Calendar"
+            variant="secondary"
+            onPress={addToCalendar}
+            loading={calendarBusy}
+            style={{marginBottom: spacing.sm}}
+          />
+        ) : null}
         <Button
           label="Back to Trip"
           onPress={() =>
@@ -84,28 +129,20 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.hero,
-    fontSize: 24,
+    fontSize: 28,
+    marginBottom: spacing.sm,
   },
   message: {
-    ...typography.subtitle,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xl,
+    ...typography.body,
+    marginBottom: spacing.lg,
   },
   card: {
-    borderWidth: 1,
-    borderRadius: radii.sm,
-    padding: spacing.lg,
-    marginBottom: spacing.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
   },
-  cardLabel: {
-    ...typography.label,
-  },
-  cardTitle: {
-    ...typography.title,
-    marginTop: spacing.xs,
-  },
-  cardMeta: {
-    ...typography.caption,
-    marginTop: 4,
-  },
+  cardLabel: {...typography.label},
+  cardTitle: {...typography.title, fontSize: 18, marginTop: 4},
+  cardMeta: {...typography.caption, marginTop: 4},
 });

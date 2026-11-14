@@ -37,6 +37,13 @@ export function AppHeader({style}: AppHeaderProps) {
           <Icon name="instagram" size={20} color={theme.text} />
         </Pressable>
         <Pressable
+          onPress={() => navigation.navigate('ChatInbox')}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Trip chats">
+          <Icon name="mail" size={20} color={theme.text} />
+        </Pressable>
+        <Pressable
           onPress={() => navigation.navigate('Notifications')}
           hitSlop={12}
           style={styles.bellWrap}

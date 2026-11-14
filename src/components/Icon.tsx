@@ -39,7 +39,9 @@ export type IconName =
   | 'chevron-down'
   | 'chevron-up'
   | 'badge'
-  | 'clock';
+  | 'clock'
+  | 'play'
+  | 'pause';
 
 interface IconProps {
   name: IconName;
@@ -332,6 +334,21 @@ export function Icon({
         <Svg width={size} height={size} viewBox="0 0 24 24">
           <Circle cx="12" cy="12" r="8.5" {...common} />
           <Polyline points="12 7.5 12 12 15.5 14" {...common} />
+        </Svg>
+      );
+    case 'play':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Circle cx="12" cy="12" r="8.5" {...common} />
+          <Path d="M10 8.5l7 3.5-7 3.5V8.5z" {...common} />
+        </Svg>
+      );
+    case 'pause':
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Circle cx="12" cy="12" r="8.5" {...common} />
+          <Line x1="10" y1="8.5" x2="10" y2="15.5" {...common} />
+          <Line x1="14" y1="8.5" x2="14" y2="15.5" {...common} />
         </Svg>
       );
     default:

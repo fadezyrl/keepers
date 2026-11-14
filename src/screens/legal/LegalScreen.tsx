@@ -1,158 +1,116 @@
 import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {BackHeader, Screen} from '../../components';
+import {
+  BackHeader,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  Screen,
+} from '../../components';
+import {useCachedDocument} from '../../hooks/useCachedQueries';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Legal'>;
 type DocType = 'terms' | 'privacy';
 
-const TERMS = [
-  {
-    heading: 'Overview',
-    body: 'These Terms & Conditions govern membership and participation in Keepers Adventures 4x4 expeditions, events, workshops and related club services. By creating an account or joining an adventure you agree to follow these terms and all published club protocols.',
-  },
-  {
-    heading: 'Membership',
-    body: 'Membership is subject to approval, vehicle readiness and conduct standards. Keepers may suspend or revoke access for unsafe driving, repeated no-shows, harassment or breach of convoy rules. Membership tiers (Junior, Intermediate, Advanced) determine which expeditions you may register for.',
-  },
-  {
-    heading: 'Participation & cancellation',
-    body: 'Adventure registration is binding once confirmed. Cancel at least 24 hours before departure unless an emergency applies. Participants must arrive on time with required recovery gear, water and a roadworthy 4x4. Guides may refuse departure if safety standards are not met.',
-  },
-  {
-    heading: 'Liability & conduct',
-    body: 'Off-road activity carries inherent risk. Members participate voluntarily and are responsible for their vehicle, passengers and personal equipment. Reckless driving, littering and unauthorized drone use are prohibited. Contact hello@keepersadventures.ae for membership or legal questions.',
-  },
-];
-
-const PRIVACY = [
-  {
-    heading: 'Overview',
-    body: 'Keepers Adventures 4x4 respects member privacy. This policy explains what information we collect in the app, why we use it, and the choices available to you.',
-  },
-  {
-    heading: 'Information we collect',
-    body: 'We collect account details (name, email, phone), profile and vehicle information you provide, expedition registrations, notification preferences, and basic device settings such as display mode. Emergency contacts are stored so guides can reach the right person if needed.',
-  },
-  {
-    heading: 'How information is used',
-    body: 'We use your data to authenticate membership, manage trip registrations, send trip and club notifications, operate the members directory according to your privacy settings, and improve expedition safety and operations.',
-  },
-  {
-    heading: 'Your choices',
-    body: 'You may update profile details, notification preferences and privacy controls in Settings. You may request account deletion from the club administration. For privacy requests email hello@keepersadventures.ae. We retain membership records only as long as needed for club operations and safety compliance.',
-  },
-];
+const SLUG: Record<DocType, string> = {
+  terms: 'terms',
+  privacy: 'privacy',
+};
 
 export function LegalScreen({navigation, route}: Props) {
   const theme = useThemeColors();
-  const [active, setActive] = useState<DocType>(route.params.type);
-  const sections = active === 'terms' ? TERMS : PRIVACY;
+  const type = route.params.type;
+  const [active, setActive] = useState<DocType>(type);
+  const docQuery = useCachedDocument(SLUG[active]);
+  const doc = docQuery.data || null;
+  const loading = docQuery.isLoading && !doc;
+  const error =
+    docQuery.isError && !doc
+      ? docQuery.error instanceof Error
+        ? docQuery.error.message
+        : 'Unable to load document.'
+      : null;
+  const load = async () => {
+    await docQuery.refetch();
+  };
 
   return (
-    <Screen scroll>
+    <Screen scroll onRefresh={load}>
       <BackHeader onBack={() => navigation.goBack()} />
-      <Text style={[styles.kicker, {color: theme.textMuted}]}>
-        Keepers Adventures
-      </Text>
+      <Text style={[styles.kicker, {color: theme.textMuted}]}>Legal</Text>
       <Text style={[styles.title, {color: theme.text}]}>
-        Terms & Privacy
+        Terms and Privacy
       </Text>
 
-      <View style={[styles.tabs, {borderColor: theme.border}]}>
-        <Tab
-          label="Terms & Conditions"
-          active={active === 'terms'}
-          onPress={() => setActive('terms')}
-        />
-        <Tab
-          label="Privacy Policy"
-          active={active === 'privacy'}
-          onPress={() => setActive('privacy')}
-        />
+      <View style={styles.tabs}>
+        {(['terms', 'privacy'] as DocType[]).map(tab => {
+          const selected = active === tab;
+          return (
+            <Pressable
+              key={tab}
+              onPress={() => setActive(tab)}
+              style={[
+                styles.tab,
+                {
+                  borderColor: selected ? theme.text : theme.border,
+                  backgroundColor: selected ? theme.inverse : theme.surface,
+                },
+              ]}>
+              <Text
+                style={{
+                  color: selected ? theme.onInverse : theme.text,
+                  ...typography.label,
+                }}>
+                {tab === 'terms' ? 'Terms' : 'Privacy'}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      <Text style={[styles.updated, {color: theme.textMuted}]}>
-        Last updated · November 2026
-      </Text>
-
-      {sections.map(section => (
-        <View key={section.heading} style={styles.block}>
-          <Text style={[styles.heading, {color: theme.text}]}>
-            {section.heading}
-          </Text>
-          <Text style={[styles.body, {color: theme.text}]}>
-            {section.body}
-          </Text>
+      {loading ? <LoadingState /> : null}
+      {!loading && error ? (
+        <ErrorState
+          title="Document unavailable"
+          message={error}
+          actionLabel="Retry"
+          onAction={load}
+        />
+      ) : null}
+      {!loading && !error && !doc?.content?.trim() ? (
+        <EmptyState
+          title="No content yet"
+          message="This legal document has not been published."
+        />
+      ) : null}
+      {!loading && !error && doc?.content ? (
+        <View style={styles.body}>
+          <Text style={[styles.docTitle, {color: theme.text}]}>{doc.title}</Text>
+          <Text style={[styles.copy, {color: theme.text}]}>{doc.content}</Text>
         </View>
-      ))}
+      ) : null}
     </Screen>
-  );
-}
-
-function Tab({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const theme = useThemeColors();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.tab,
-        active && {
-          borderBottomColor: theme.text,
-          borderBottomWidth: 1,
-        },
-      ]}>
-      <Text
-        style={[
-          styles.tabLabel,
-          {color: active ? theme.text : theme.textMuted},
-        ]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   kicker: {...typography.label},
-  title: {
-    ...typography.hero,
-    fontSize: 24,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-  },
+  title: {...typography.hero, fontSize: 28, marginTop: spacing.xs},
   tabs: {
     flexDirection: 'row',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+    marginTop: spacing.lg,
     marginBottom: spacing.md,
   },
   tab: {
-    flex: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'transparent',
   },
-  tabLabel: {
-    ...typography.label,
-    letterSpacing: 1.2,
-    textAlign: 'center',
-  },
-  updated: {
-    ...typography.caption,
-    marginBottom: spacing.lg,
-  },
-  block: {marginBottom: spacing.lg},
-  heading: {...typography.section, marginBottom: spacing.xs},
-  body: {...typography.body},
+  body: {marginTop: spacing.sm},
+  docTitle: {...typography.title, fontSize: 18, marginBottom: spacing.md},
+  copy: {...typography.body, lineHeight: 24},
 });

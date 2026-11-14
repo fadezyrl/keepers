@@ -1,8 +1,9 @@
-import React from 'react';
+import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {Button, EmptyState, Icon, Screen} from '../../components';
 import {useApp} from '../../context/AppContext';
+import {navigateFromDeepLink} from '../../notifications/navigationFromPush';
 import {RootStackParamList} from '../../navigation/types';
 import {radii, spacing, typography, useThemeColors} from '../../theme';
 import {NotificationType} from '../../types';
@@ -19,15 +20,58 @@ const typeIcon: Record<
   event: 'star',
   club: 'about',
   admin: 'bell',
+  upgrade: 'star',
+  announcement: 'about',
 };
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 export function NotificationsScreen({navigation}: Props) {
   const theme = useThemeColors();
-  const {notifications, markNotificationRead, markAllNotificationsRead} =
-    useApp();
+  const {
+    notifications,
+    markNotificationRead,
+    markAllNotificationsRead,
+    refreshNotificationsQuiet,
+  } = useApp();
+  const [error, setError] = useState<string | null>(null);
+
+  const onRefresh = useCallback(async () => {
+    setError(null);
+    try {
+      await refreshNotificationsQuiet();
+    } catch {
+      setError('Could not refresh notifications. Pull to try again.');
+    }
+  }, [refreshNotificationsQuiet]);
+
+  const onOpen = useCallback(
+    (id: string, data?: Record<string, unknown>) => {
+      markNotificationRead(id);
+      const deepLink =
+        (typeof data?.deepLink === 'string' && data.deepLink) ||
+        (typeof data?.screen === 'string' && data.screen) ||
+        (typeof data?.tripId === 'string'
+          ? `keepers://trips/${data.tripId}`
+          : null);
+      if (deepLink) {
+        navigateFromDeepLink(deepLink);
+      }
+    },
+    [markNotificationRead],
+  );
 
   return (
-    <Screen scroll>
+    <Screen scroll onRefresh={onRefresh}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
           <Icon name="chevron-left" color={theme.text} />
@@ -35,6 +79,10 @@ export function NotificationsScreen({navigation}: Props) {
         <Text style={[styles.title, {color: theme.text}]}>Notifications</Text>
         <View style={{width: 24}} />
       </View>
+
+      {error ? (
+        <Text style={[styles.error, {color: theme.textMuted}]}>{error}</Text>
+      ) : null}
 
       {notifications.length > 0 ? (
         <Button
@@ -59,9 +107,13 @@ export function NotificationsScreen({navigation}: Props) {
               {borderBottomColor: theme.border},
               !item.read && {backgroundColor: theme.bgMuted},
             ]}
-            onPress={() => markNotificationRead(item.id)}>
+            onPress={() => onOpen(item.id, item.data)}>
             <View style={[styles.iconWrap, {borderColor: theme.border}]}>
-              <Icon name={typeIcon[item.type]} size={18} color={theme.text} />
+              <Icon
+                name={typeIcon[item.type] || 'bell'}
+                size={18}
+                color={theme.text}
+              />
             </View>
             <View style={styles.body}>
               <Text style={[styles.itemTitle, {color: theme.text}]}>
@@ -71,7 +123,7 @@ export function NotificationsScreen({navigation}: Props) {
                 {item.body}
               </Text>
               <Text style={[styles.time, {color: theme.textMuted}]}>
-                {item.timestamp}
+                {formatTimestamp(item.timestamp)}
               </Text>
             </View>
             {!item.read ? (
@@ -98,6 +150,10 @@ const styles = StyleSheet.create({
   markAll: {
     alignSelf: 'flex-end',
     minHeight: 40,
+    marginBottom: spacing.sm,
+  },
+  error: {
+    ...typography.caption,
     marginBottom: spacing.sm,
   },
   row: {

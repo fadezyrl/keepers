@@ -5,94 +5,156 @@ import {
   BackHeader,
   Button,
   EmptyState,
-  Icon,
+  ErrorState,
+  LoadingState,
   Screen,
   StatusPill,
 } from '../../components';
 import {useApp} from '../../context/AppContext';
+import {
+  useCachedAssignedTrips,
+  useCachedOrganizedTrips,
+} from '../../hooks/useCachedQueries';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
+import {Trip} from '../../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MarshallHub'>;
 
 export function MarshallHubScreen({navigation}: Props) {
   const theme = useThemeColors();
-  const {trips, user} = useApp();
+  const {hasPermission} = useApp();
+  const canCreateDrive = hasPermission('trips.create');
+  const canRecommend = hasPermission('upgrades.recommend');
+  const canListOrganized =
+    hasPermission('trips.create') ||
+    hasPermission('trips.manage_own') ||
+    hasPermission('trips.manage');
 
-  const organized = useMemo(() => {
-    return trips.filter(
-      trip =>
-        trip.organizerId === user.id ||
-        trip.organizer.name
-          .toLowerCase()
-          .includes(`${user.firstName} ${user.lastName}`.trim().toLowerCase()),
-    );
-  }, [trips, user.firstName, user.id, user.lastName]);
+  const drivesQuery = useCachedOrganizedTrips(canListOrganized);
+  const assignedQuery = useCachedAssignedTrips();
+
+  const organized = drivesQuery.data || [];
+  const assigned = assignedQuery.data || [];
+
+  const drives = useMemo(() => {
+    const byId = new Map<string, Trip>();
+    for (const trip of organized) {
+      byId.set(trip.id, {...trip, accessMode: trip.accessMode || 'organizer'});
+    }
+    for (const trip of assigned) {
+      if (!byId.has(trip.id)) {
+        byId.set(trip.id, {...trip, accessMode: 'assigned'});
+      }
+    }
+    return Array.from(byId.values());
+  }, [organized, assigned]);
+
+  const loading =
+    (canListOrganized && drivesQuery.isLoading && !drivesQuery.data) ||
+    (assignedQuery.isLoading && !assignedQuery.data);
+  const error =
+    (canListOrganized && drivesQuery.isError && !drivesQuery.data
+      ? drivesQuery.error instanceof Error
+        ? drivesQuery.error.message
+        : 'Unable to load your drives.'
+      : null) ||
+    (assignedQuery.isError && !assignedQuery.data
+      ? assignedQuery.error instanceof Error
+        ? assignedQuery.error.message
+        : 'Unable to load assigned drives.'
+      : null);
+
+  const load = async () => {
+    await Promise.all([
+      canListOrganized ? drivesQuery.refetch() : Promise.resolve(),
+      assignedQuery.refetch(),
+    ]);
+  };
 
   return (
-    <Screen scroll>
+    <Screen scroll onRefresh={load}>
       <BackHeader onBack={() => navigation.goBack()} />
       <Text style={[styles.kicker, {color: theme.textMuted}]}>Operations</Text>
       <Text style={[styles.title, {color: theme.text}]}>Marshall</Text>
       <Text style={[styles.sub, {color: theme.textMuted}]}>
-        Create drives, manage attendance, and rate members after each expedition.
+        {canCreateDrive
+          ? 'Create drives, manage attendance, and rate members after each expedition.'
+          : 'View assigned drive information. Drive creation, attendance, and ratings require Marshall or Admin authority.'}
       </Text>
 
       <View style={styles.actions}>
-        <Button
-          label="Create Drive"
-          onPress={() => navigation.navigate('CreateDrive')}
-        />
-        <Button
-          label="Upgrade requests"
-          variant="secondary"
-          onPress={() => navigation.navigate('MarshallUpgrades')}
-          style={{marginTop: spacing.sm}}
-        />
+        {canCreateDrive ? (
+          <Button
+            label="Create Drive"
+            onPress={() => navigation.navigate('CreateDrive')}
+          />
+        ) : null}
+        {canRecommend ? (
+          <Button
+            label="My upgrade recommendations"
+            variant="secondary"
+            onPress={() => navigation.navigate('MarshallUpgrades')}
+            style={{marginTop: canCreateDrive ? spacing.sm : 0}}
+          />
+        ) : null}
       </View>
 
       <Text style={[styles.section, {color: theme.text}]}>My drives</Text>
 
-      {organized.length === 0 ? (
-        <EmptyState
-          title="No organized drives"
-          message="Publish a drive to start managing participants and ratings."
-          actionLabel="Create Drive"
-          onAction={() => navigation.navigate('CreateDrive')}
+      {loading ? <LoadingState /> : null}
+      {!loading && error ? (
+        <ErrorState
+          title="Unable to load drives"
+          message={error}
+          actionLabel="Retry"
+          onAction={load}
         />
-      ) : (
-        organized.map(trip => (
+      ) : null}
+      {!loading && !error && drives.length === 0 ? (
+        <EmptyState
+          title="No drives"
+          message={
+            canCreateDrive
+              ? 'Publish a drive to start managing participants and ratings.'
+              : 'No drives are assigned to you yet. Ask an Admin to assign you as Pre-Marshall.'
+          }
+          actionLabel={canCreateDrive ? 'Create Drive' : undefined}
+          onAction={
+            canCreateDrive
+              ? () => navigation.navigate('CreateDrive')
+              : undefined
+          }
+        />
+      ) : null}
+
+      {!loading &&
+        !error &&
+        drives.map(trip => (
           <Pressable
             key={trip.id}
             onPress={() =>
               navigation.navigate('DriveParticipants', {tripId: trip.id})
             }
-            style={({pressed}) => [
-              styles.row,
-              {
-                borderColor: theme.border,
-                backgroundColor: theme.surface,
-                opacity: pressed ? 0.85 : 1,
-              },
+            style={[
+              styles.card,
+              {borderColor: theme.border, backgroundColor: theme.surface},
             ]}>
-            <View style={styles.rowTop}>
-              <Text style={[styles.rowTitle, {color: theme.text}]}>
+            <View style={styles.row}>
+              <Text style={[styles.cardTitle, {color: theme.text}]} numberOfLines={2}>
                 {trip.title}
               </Text>
               <StatusPill status={trip.status} />
             </View>
-            <Text style={[styles.rowMeta, {color: theme.textMuted}]}>
-              {trip.date} · {trip.time} · {trip.destination}
+            <Text style={[styles.meta, {color: theme.textMuted}]}>
+              {trip.date} · {trip.destination}
             </Text>
-            <View style={styles.rowFooter}>
-              <Text style={[styles.rowMeta, {color: theme.textMuted}]}>
-                {trip.registeredCount}/{trip.maxParticipants} registered
-              </Text>
-              <Icon name="chevron-right" size={16} color={theme.textMuted} />
-            </View>
+            <Text style={[styles.meta, {color: theme.textMuted}]}>
+              {trip.registeredCount}/{trip.maxParticipants} registered
+              {trip.accessMode === 'assigned' ? ' · Assigned (view only)' : ''}
+            </Text>
           </Pressable>
-        ))
-      )}
+        ))}
     </Screen>
   );
 }
@@ -106,28 +168,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   actions: {marginBottom: spacing.xl},
-  section: {
-    ...typography.label,
-    marginBottom: spacing.md,
-    letterSpacing: 1.6,
-  },
-  row: {
+  section: {...typography.title, fontSize: 16, marginBottom: spacing.md},
+  card: {
     borderWidth: StyleSheet.hairlineWidth,
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  rowTop: {
+  row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
     gap: spacing.sm,
+    alignItems: 'flex-start',
   },
-  rowTitle: {...typography.title, fontSize: 17, flex: 1},
-  rowMeta: {...typography.caption, marginTop: spacing.xs},
-  rowFooter: {
-    marginTop: spacing.sm,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+  cardTitle: {...typography.title, fontSize: 16, flex: 1},
+  meta: {...typography.caption, marginTop: spacing.xs},
 });

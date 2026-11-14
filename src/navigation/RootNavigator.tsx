@@ -1,9 +1,15 @@
-import React from 'react';
-import {View} from 'react-native';
-import {DefaultTheme, NavigationContainer} from '@react-navigation/native';
+import React, {useEffect, useRef} from 'react';
+import {Linking, View} from 'react-native';
+import {
+  DefaultTheme,
+  NavigationContainer,
+  NavigationContainerRef,
+} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {LoadingState, Screen} from '../components';
+import {linkingConfig, parseRecoveryParams} from '../config/linking';
 import {useApp} from '../context/AppContext';
+import {setPushNavigationRef} from '../notifications/navigationFromPush';
 import {
   ClubBrochureScreen,
   ClubProtocolsScreen,
@@ -12,17 +18,24 @@ import {
 import {SplashScreen} from '../screens/auth/SplashScreen';
 import {GalleryViewerScreen} from '../screens/gallery/GalleryViewerScreen';
 import {LegalScreen} from '../screens/legal/LegalScreen';
-import {NotificationsScreen} from '../screens/notifications/NotificationsScreen';
 import {CreateDriveScreen} from '../screens/marshall/CreateDriveScreen';
 import {DriveParticipantsScreen} from '../screens/marshall/DriveParticipantsScreen';
+import {ManageTripMediaScreen} from '../screens/marshall/ManageTripMediaScreen';
+import {ChatInboxScreen} from '../screens/chat/ChatInboxScreen';
+import {ChatThreadScreen} from '../screens/chat/ChatThreadScreen';
 import {MarshallHubScreen} from '../screens/marshall/MarshallHubScreen';
 import {MarshallUpgradesScreen} from '../screens/marshall/MarshallUpgradesScreen';
 import {RateMemberScreen} from '../screens/marshall/RateMemberScreen';
+import {NotificationsScreen} from '../screens/notifications/NotificationsScreen';
 import {ChangePasswordScreen} from '../screens/settings/ChangePasswordScreen';
 import {DisplayModeScreen} from '../screens/settings/DisplayModeScreen';
 import {EditProfileScreen} from '../screens/settings/EditProfileScreen';
+import {NotificationPreferencesScreen} from '../screens/settings/NotificationPreferencesScreen';
 import {MemberProfileScreen} from '../screens/settings/MemberProfileScreen';
 import {MembersDirectoryScreen} from '../screens/settings/MembersDirectoryScreen';
+import {MyAdventureHistoryScreen} from '../screens/progress/MyAdventureHistoryScreen';
+import {MyProgressScreen} from '../screens/progress/MyProgressScreen';
+import {MyTripPerformanceScreen} from '../screens/progress/MyTripPerformanceScreen';
 import {RegistrationConfirmScreen} from '../screens/trips/RegistrationConfirmScreen';
 import {TripDetailsScreen} from '../screens/trips/TripDetailsScreen';
 import {useThemeColors} from '../theme';
@@ -49,6 +62,10 @@ function AppStack() {
         component={RegistrationConfirmScreen}
       />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen
+        name="NotificationPreferences"
+        component={NotificationPreferencesScreen}
+      />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen
         name="GalleryViewer"
@@ -84,18 +101,58 @@ function AppStack() {
         name="DriveParticipants"
         component={DriveParticipantsScreen}
       />
-      <Stack.Screen name="RateMember" component={RateMemberScreen} />
       <Stack.Screen
-        name="MarshallUpgrades"
-        component={MarshallUpgradesScreen}
+        name="ManageTripMedia"
+        component={ManageTripMediaScreen}
+      />
+      <Stack.Screen name="ChatInbox" component={ChatInboxScreen} />
+      <Stack.Screen name="ChatThread" component={ChatThreadScreen} />
+      <Stack.Screen name="RateMember" component={RateMemberScreen} />
+      <Stack.Screen name="MarshallUpgrades" component={MarshallUpgradesScreen} />
+      <Stack.Screen name="MyProgress" component={MyProgressScreen} />
+      <Stack.Screen
+        name="MyAdventureHistory"
+        component={MyAdventureHistoryScreen}
+      />
+      <Stack.Screen
+        name="MyTripPerformance"
+        component={MyTripPerformanceScreen}
       />
     </Stack.Navigator>
   );
 }
 
 export function RootNavigator() {
-  const {bootstrapped, authMode, displayMode} = useApp();
+  const {
+    bootstrapped,
+    authMode,
+    displayMode,
+    setRecoveryAccessToken,
+    setOffline,
+  } = useApp();
   const theme = useThemeColors();
+  const navRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  useEffect(() => {
+    setPushNavigationRef(navRef as any);
+    return () => setPushNavigationRef(null);
+  }, []);
+
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      if (!url) return;
+      const {accessToken, type} = parseRecoveryParams(url);
+      if (accessToken && (type === 'recovery' || !type || url.includes('reset-password'))) {
+        setRecoveryAccessToken(accessToken);
+      }
+    };
+
+    Linking.getInitialURL()
+      .then(url => handleUrl(url ?? null))
+      .catch(() => undefined);
+    const sub = Linking.addEventListener('url', ({url}) => handleUrl(url));
+    return () => sub.remove();
+  }, [setRecoveryAccessToken, setOffline]);
 
   if (!bootstrapped && authMode === 'splash') {
     return <SplashScreen />;
@@ -124,7 +181,10 @@ export function RootNavigator() {
 
   return (
     <View style={{flex: 1, backgroundColor: theme.bg}}>
-      <NavigationContainer theme={navTheme}>
+      <NavigationContainer
+        ref={navRef}
+        theme={navTheme}
+        linking={linkingConfig}>
         {authMode === 'app' ? <AppStack /> : <AuthNavigator />}
       </NavigationContainer>
     </View>

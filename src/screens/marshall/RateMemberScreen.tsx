@@ -1,17 +1,12 @@
-import React, {useEffect, useState} from 'react';
-import {
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, {useEffect, useMemo, useState} from 'react';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {BackHeader, Button, Screen} from '../../components';
-import {
-  fetchRatingCriteria,
-  submitRatingRequest,
-} from '../../api/keepersApi';
+import {showAlert} from '../../alerts';
+import {BackHeader, BusyOverlay, Button, Screen} from '../../components';
+import {submitRatingRequest} from '../../api/keepersApi';
+import {invalidateAfterMarshallMutation, useCacheSession} from '../../cache';
+import {useApp} from '../../context/AppContext';
+import {useCachedRatingCriteria} from '../../hooks/useCachedQueries';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
 
@@ -28,47 +23,46 @@ type UpgradeOption = '' | 'Intermediate' | 'Advanced';
 
 export function RateMemberScreen({navigation, route}: Props) {
   const theme = useThemeColors();
+  const {user} = useApp();
+  const {queryClient, activeUserId} = useCacheSession();
   const {tripId, memberId, memberName} = route.params;
-  const [criteria, setCriteria] = useState<Criterion[]>([]);
+  const criteriaQuery = useCachedRatingCriteria();
+  const criteria = useMemo<Criterion[]>(
+    () =>
+      (criteriaQuery.data || []).map((c: any) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        description: c.description,
+      })),
+    [criteriaQuery.data],
+  );
   const [scores, setScores] = useState<Record<string, number>>({});
   const [upgradeTo, setUpgradeTo] = useState<UpgradeOption>('');
-  const [loading, setLoading] = useState(true);
+  const loading = criteriaQuery.isLoading && !criteria.length;
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    criteriaQuery.isError && !criteria.length
+      ? criteriaQuery.error instanceof Error
+        ? criteriaQuery.error.message
+        : 'Unable to load rating criteria.'
+      : null,
+  );
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const list = await fetchRatingCriteria();
-        if (!active) return;
-        const mapped = (list || []).map((c: any) => ({
-          id: c.id,
-          code: c.code,
-          name: c.name,
-          description: c.description,
-        }));
-        setCriteria(mapped);
-        const initial: Record<string, number> = {};
-        mapped.forEach(c => {
-          initial[c.id] = 3;
-        });
-        setScores(initial);
-      } catch (err) {
-        if (!active) return;
-        const message =
-          err && typeof err === 'object' && 'message' in err
-            ? String((err as {message: string}).message)
-            : 'Unable to load rating criteria.';
-        setError(message);
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (!criteria.length) return;
+    setScores(prev => {
+      const next = {...prev};
+      let changed = false;
+      criteria.forEach(c => {
+        if (next[c.id] == null) {
+          next[c.id] = 3;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [criteria]);
 
   const onSubmit = async () => {
     if (!criteria.length) {
@@ -88,9 +82,17 @@ export function RateMemberScreen({navigation, route}: Props) {
         })),
         recommendUpgradeTo: upgradeTo || undefined,
       });
-      Alert.alert('Rating submitted', `${memberName} has been rated.`, [
-        {text: 'Done', onPress: () => navigation.goBack()},
-      ]);
+      const uid = user.id || activeUserId;
+      if (uid) {
+        await invalidateAfterMarshallMutation(queryClient, uid, tripId);
+      }
+      showAlert({
+        type: 'success',
+        title: 'Rating submitted',
+        message: `${memberName} has been rated.`,
+        buttonText: 'Done',
+        onClose: () => navigation.goBack(),
+      });
     } catch (err) {
       const message =
         err && typeof err === 'object' && 'message' in err
@@ -196,6 +198,7 @@ export function RateMemberScreen({navigation, route}: Props) {
         disabled={loading || !criteria.length}
         style={{marginTop: spacing.md, marginBottom: spacing.xxl}}
       />
+      <BusyOverlay visible={saving} message="Submitting rating…" />
     </Screen>
   );
 }

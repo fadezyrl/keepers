@@ -2,27 +2,23 @@ import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {colors, typography} from '../theme';
 import {TripStatus} from '../types';
-
-const labels: Record<TripStatus, string> = {
-  upcoming: 'Upcoming',
-  completed: 'Completed',
-  full: 'Full',
-  registered: 'Registered',
-  pending: 'Pending',
-  waitlist: 'Waitlist',
-};
+import {statusPillLabel} from '../utils/tripPresentation';
 
 export function StatusPill({
   status,
   tone = 'light',
+  label,
 }: {
   status: TripStatus;
   tone?: 'light' | 'dark';
+  label?: string;
 }) {
   const dark = tone === 'dark';
   return (
     <View style={[styles.pill, dark && styles.pillDark]}>
-      <Text style={[styles.text, dark && styles.textDark]}>{labels[status]}</Text>
+      <Text style={[styles.text, dark && styles.textDark]}>
+        {label || statusPillLabel(status)}
+      </Text>
     </View>
   );
 }

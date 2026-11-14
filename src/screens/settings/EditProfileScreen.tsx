@@ -1,9 +1,11 @@
-import React, {useMemo, useState} from 'react';
-import {Alert, Pressable, StyleSheet, Text, View} from 'react-native';
+import React, {useState} from 'react';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {showAlert, showToast} from '../../alerts';
 import {
   Avatar,
   BackHeader,
+  BusyOverlay,
   Button,
   Icon,
   ImagePickerSheet,
@@ -12,9 +14,9 @@ import {
   Screen,
 } from '../../components';
 import {useApp} from '../../context/AppContext';
-import {images} from '../../data/images';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
+import {uploadProfileImage} from '../../utils/mediaUpload';
 import {FieldErrors, validateProfile} from '../../utils/validation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EditProfile'>;
@@ -45,23 +47,83 @@ export function EditProfileScreen({navigation}: Props) {
   const [vehicleOpen, setVehicleOpen] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
-
-  const avatarOptions = useMemo(() => [images.avatars.user], []);
-
-  const vehicleOptions = useMemo(
-    () => [
-      images.vehicle,
-      images.trips.liwa,
-      images.trips.hatta,
-      images.trips.fossil,
-      images.trips.jebel,
-      images.trips.emptyQuarter,
-    ],
-    [],
-  );
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingVehicle, setUploadingVehicle] = useState(false);
 
   const set = (key: keyof typeof form, value: string) =>
     setForm(prev => ({...prev, [key]: value}));
+
+  const onPickAvatar = async (file: {
+    uri: string;
+    name: string;
+    type: string;
+  }) => {
+    setUploadingAvatar(true);
+    setAvatarOpen(false);
+    try {
+      const url = await uploadProfileImage(file, 'avatar');
+      setAvatar(url);
+      // Persist immediately so refresh / leaving the screen does not drop the photo
+      await updateProfile({
+        ...user,
+        avatar: url,
+      });
+      showToast({type: 'success', message: 'Profile photo updated'});
+    } catch (error) {
+      showAlert({
+        type: 'error',
+        title: 'Upload failed',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Could not upload profile photo.',
+      });
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const onPickVehicle = async (file: {
+    uri: string;
+    name: string;
+    type: string;
+  }) => {
+    setUploadingVehicle(true);
+    setVehicleOpen(false);
+    try {
+      const url = await uploadProfileImage(file, 'vehicle');
+      setVehicleImage(url);
+      await updateProfile({
+        ...user,
+        avatar,
+        vehicle: {
+          ...user.vehicle,
+          image: url,
+        },
+      });
+      showToast({type: 'success', message: 'Vehicle photo updated'});
+    } catch (error) {
+      showAlert({
+        type: 'error',
+        title: 'Upload failed',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Could not upload vehicle photo.',
+      });
+    } finally {
+      setUploadingVehicle(false);
+    }
+  };
+
+  const busyMessage = uploadingAvatar
+    ? 'Uploading profile photo…'
+    : uploadingVehicle
+      ? 'Uploading car image…'
+      : saving
+        ? 'Saving profile…'
+        : 'Please wait…';
+  const isBusy = uploadingAvatar || uploadingVehicle || saving;
 
   const onSave = async () => {
     const nextErrors = validateProfile({
@@ -104,8 +166,18 @@ export function EditProfileScreen({navigation}: Props) {
           tiktok: form.tiktok.trim(),
         },
       });
-      Alert.alert('Profile updated', 'Your Keepers profile has been saved.');
+      showToast({
+        type: 'success',
+        message: 'Profile saved',
+      });
       navigation.goBack();
+    } catch (error) {
+      showAlert({
+        type: 'error',
+        title: 'Could not save profile',
+        message:
+          error instanceof Error ? error.message : 'Please try again.',
+      });
     } finally {
       setSaving(false);
     }
@@ -118,8 +190,9 @@ export function EditProfileScreen({navigation}: Props) {
       <Text style={[styles.title, {color: theme.text}]}>Edit profile</Text>
 
       <Pressable
-        onPress={() => setAvatarOpen(true)}
+        onPress={() => !isBusy && setAvatarOpen(true)}
         style={styles.avatarBlock}
+        disabled={isBusy}
         accessibilityRole="button"
         accessibilityLabel="Change profile photo">
         <View style={styles.avatarWrap}>
@@ -129,7 +202,7 @@ export function EditProfileScreen({navigation}: Props) {
           </View>
         </View>
         <Text style={[styles.changePhoto, {color: theme.text}]}>
-          Change profile photo
+          {uploadingAvatar ? 'Uploading photo…' : 'Change profile photo'}
         </Text>
       </Pressable>
 
@@ -199,12 +272,13 @@ export function EditProfileScreen({navigation}: Props) {
 
       <Text style={[styles.section, {color: theme.textMuted}]}>Vehicle</Text>
       <Pressable
-        onPress={() => setVehicleOpen(true)}
+        onPress={() => !isBusy && setVehicleOpen(true)}
+        disabled={isBusy}
         accessibilityRole="button"
         accessibilityLabel="Change car image">
         <RemoteImage uri={vehicleImage} style={styles.vehicleImage} />
         <Text style={[styles.changePhoto, {color: theme.text, marginBottom: spacing.md}]}>
-          Change car image
+          {uploadingVehicle ? 'Uploading car image…' : 'Change car image'}
         </Text>
       </Pressable>
       <Input
@@ -257,19 +331,18 @@ export function EditProfileScreen({navigation}: Props) {
       <ImagePickerSheet
         visible={avatarOpen}
         title="Profile photo"
-        options={avatarOptions}
-        selected={avatar}
-        onSelect={setAvatar}
+        onSelect={onPickAvatar}
         onClose={() => setAvatarOpen(false)}
+        uploading={uploadingAvatar}
       />
       <ImagePickerSheet
         visible={vehicleOpen}
         title="Car image"
-        options={vehicleOptions}
-        selected={vehicleImage}
-        onSelect={setVehicleImage}
+        onSelect={onPickVehicle}
         onClose={() => setVehicleOpen(false)}
+        uploading={uploadingVehicle}
       />
+      <BusyOverlay visible={isBusy} message={busyMessage} />
     </Screen>
   );
 }
