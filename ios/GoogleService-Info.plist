@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.keepers</string>
+	<string>com.keepers.adventures</string>
 	<key>PROJECT_ID</key>
 	<string>keepers-68d3e</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:540730311833:ios:e6f160009c82f611e6e408</string>
+	<string>1:540730311833:ios:fa40e18f8a219a78e6e408</string>
 </dict>
 </plist>

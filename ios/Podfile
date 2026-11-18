@@ -8,18 +8,15 @@ require Pod::Executable.execute_command('node', ['-p',
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Required for react-native-firebase SPM (Firebase 13+)
+use_frameworks! :linkage => :dynamic
 
 target 'keepers' do
   config = use_native_modules!
 
   use_react_native!(
     :path => config[:reactNativePath],
-    # An absolute path to your application root.
+    # An absolute path to the application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
@@ -30,5 +27,21 @@ target 'keepers' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # use_frameworks! + image-picker needs explicit UTType frameworks
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'react-native-image-picker'
+
+      target.build_configurations.each do |bc|
+        flags = bc.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        flags = [flags] if flags.is_a?(String)
+        %w[MobileCoreServices UniformTypeIdentifiers].each do |fw|
+          next if flags.include?(fw)
+
+          flags.concat(['-framework', fw])
+        end
+        bc.build_settings['OTHER_LDFLAGS'] = flags
+      end
+    end
   end
 end
