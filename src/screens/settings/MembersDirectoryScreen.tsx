@@ -1,19 +1,28 @@
-import React, {useMemo, useState} from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import {useNavigation} from '@react-navigation/native';
+import {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {
+  AppHeader,
   Avatar,
   BackHeader,
   EmptyState,
   Icon,
+  LoadingState,
   Screen,
 } from '../../components';
+import {fetchDirectory} from '../../api/keepersApi';
 import {useApp} from '../../context/AppContext';
 import {RootStackParamList} from '../../navigation/types';
 import {radii, spacing, typography, useThemeColors} from '../../theme';
-import {MembershipLevel} from '../../types';
-
-type Props = NativeStackScreenProps<RootStackParamList, 'MembersDirectory'>;
+import {ClubMember, MembershipLevel} from '../../types';
 
 const FILTERS: Array<'All' | MembershipLevel> = [
   'All',
@@ -22,122 +31,207 @@ const FILTERS: Array<'All' | MembershipLevel> = [
   'Advanced',
 ];
 
-export function MembersDirectoryScreen({navigation}: Props) {
+const TAB_BAR_HEIGHT = 64;
+const TAB_BAR_MIN_OFFSET = 10;
+
+function membershipCode(level: MembershipLevel): string {
+  return level.toLowerCase();
+}
+
+function roleLabel(member: ClubMember): string {
+  const roles = (member.roles || [])
+    .map(r => (typeof r === 'string' ? r : r?.name || r?.code || ''))
+    .filter(Boolean);
+  if (roles.some(r => /super.?admin/i.test(String(r)))) return 'Super Admin';
+  if (roles.some(r => /^admin$/i.test(String(r)))) return 'Admin';
+  if (roles.some(r => /marshall/i.test(String(r)) && !/pre/i.test(String(r)))) {
+    return 'Marshall';
+  }
+  if (roles.some(r => /pre.?marshall/i.test(String(r)))) return 'Pre-Marshall';
+  return member.membership || 'Member';
+}
+
+export function MembersDirectoryScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const theme = useThemeColors();
+  const insets = useSafeAreaInsets();
   const {members} = useApp();
   const [query, setQuery] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
   const [level, setLevel] = useState<(typeof FILTERS)[number]>('All');
+  const [remoteItems, setRemoteItems] = useState<ClubMember[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return members.filter(m => {
-      const matchesLevel = level === 'All' || m.membership === level;
-      if (!matchesLevel) {
-        return false;
-      }
-      if (!q) {
-        return true;
-      }
-      return (
-        m.name.toLowerCase().includes(q) ||
-        m.username.toLowerCase().includes(q) ||
-        m.membership.toLowerCase().includes(q) ||
-        m.vehicle.toLowerCase().includes(q)
+  const parentState = navigation.getParent()?.getState?.();
+  const isTab =
+    Array.isArray(parentState?.routeNames) &&
+    parentState.routeNames.includes('Discover');
+
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedQ(query.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  const runSearch = useCallback(async () => {
+    // Server search only when querying — never mixes drives/gallery.
+    if (!debouncedQ && level === 'All') {
+      setRemoteItems(null);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const items = await fetchDirectory({
+        q: debouncedQ || undefined,
+        membership: level === 'All' ? undefined : membershipCode(level),
+      });
+      setRemoteItems(items);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Unable to search members.',
       );
-    });
-  }, [members, query, level]);
+      setRemoteItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedQ, level]);
+
+  useEffect(() => {
+    void runSearch();
+  }, [runSearch]);
+
+  const displayed = useMemo(() => {
+    if (remoteItems) return remoteItems;
+    if (level === 'All') return members;
+    return members.filter(m => m.membership === level);
+  }, [remoteItems, members, level]);
+
+  const tabClearance = isTab
+    ? TAB_BAR_HEIGHT + Math.max(insets.bottom, TAB_BAR_MIN_OFFSET) + spacing.md
+    : spacing.xl;
 
   return (
-    <Screen scroll>
-      <BackHeader onBack={() => navigation.goBack()} />
-      <Text style={[styles.kicker, {color: theme.textMuted}]}>Community</Text>
-      <Text style={[styles.title, {color: theme.text}]}>Members</Text>
-      <Text style={[styles.sub, {color: theme.textMuted}]}>
-        Browse registered Keepers members by name or membership level.
-      </Text>
+    <Screen scroll padded={false} edges={['top']}>
+      {isTab ? <AppHeader /> : <BackHeader onBack={() => navigation.goBack()} />}
+      <View style={[styles.pad, {paddingBottom: tabClearance}]}>
+        <Text style={[styles.kicker, {color: theme.textMuted}]}>Community</Text>
+        <Text style={[styles.title, {color: theme.text}]}>Members</Text>
+        <Text style={[styles.sub, {color: theme.textMuted}]}>
+          Search Keepers members only — name, Marshall rank and membership.
+        </Text>
 
-      <View
-        style={[
-          styles.search,
-          {borderColor: theme.border, backgroundColor: theme.surface},
-        ]}>
-        <Icon name="search" size={18} color={theme.textMuted} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search members"
-          placeholderTextColor={theme.textMuted}
-          style={[styles.input, {color: theme.text}]}
-        />
-      </View>
+        <View
+          style={[
+            styles.search,
+            {borderColor: theme.border, backgroundColor: theme.surface},
+          ]}>
+          <Icon name="search" size={18} color={theme.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search members"
+            placeholderTextColor={theme.textMuted}
+            style={[styles.input, {color: theme.text}]}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+        </View>
 
-      <View style={styles.filters}>
-        {FILTERS.map(item => {
-          const active = level === item;
-          return (
-            <Pressable
-              key={item}
-              onPress={() => setLevel(item)}
-              style={[
-                styles.filterChip,
-                {
-                  borderColor: theme.border,
-                  backgroundColor: active ? theme.inverse : theme.surface,
-                },
-              ]}>
-              <Text
+        <View style={styles.filters}>
+          {FILTERS.map(item => {
+            const active = level === item;
+            return (
+              <Pressable
+                key={item}
+                onPress={() => setLevel(item)}
                 style={[
-                  styles.filterLabel,
-                  {color: active ? theme.onInverse : theme.textMuted},
+                  styles.filterChip,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor: active ? theme.inverse : theme.surface,
+                  },
                 ]}>
-                {item}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+                <Text
+                  style={[
+                    styles.filterLabel,
+                    {color: active ? theme.onInverse : theme.textMuted},
+                  ]}>
+                  {item}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-      {filtered.length === 0 ? (
-        <EmptyState
-          title="No members found"
-          message="Try a different search or membership filter."
-          actionLabel="Reset"
-          onAction={() => {
-            setQuery('');
-            setLevel('All');
-          }}
-        />
-      ) : (
-        filtered.map(member => (
-          <Pressable
-            key={member.id}
-            onPress={() =>
-              navigation.navigate('MemberProfile', {memberId: member.id})
-            }
-            style={({pressed}) => [
-              styles.row,
-              {borderBottomColor: theme.border, opacity: pressed ? 0.75 : 1},
-            ]}>
-            <Avatar uri={member.avatar} size={52} />
-            <View style={{flex: 1}}>
-              <Text style={[styles.name, {color: theme.text}]}>
-                {member.name}
-              </Text>
-              <Text style={[styles.meta, {color: theme.textMuted}]}>
-                {member.membership}
-              </Text>
-            </View>
-            <Icon name="chevron-right" size={16} color={theme.textMuted} />
-          </Pressable>
-        ))
-      )}
+        {loading ? <LoadingState label="Searching members…" /> : null}
+        {!loading && error ? (
+          <EmptyState
+            title="Search failed"
+            message={error}
+            actionLabel="Retry"
+            onAction={() => void runSearch()}
+          />
+        ) : null}
+        {!loading && !error && displayed.length === 0 ? (
+          <EmptyState
+            title="No members found"
+            message="Try a different name or membership filter."
+            actionLabel="Reset"
+            onAction={() => {
+              setQuery('');
+              setLevel('All');
+            }}
+          />
+        ) : null}
+
+        {!loading && !error
+          ? displayed.map(member => (
+              <Pressable
+                key={member.id}
+                onPress={() =>
+                  navigation.navigate('MemberProfile', {memberId: member.id})
+                }
+                style={({pressed}) => [
+                  styles.banner,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor: theme.surface,
+                    opacity: pressed ? 0.88 : 1,
+                  },
+                ]}>
+                <Avatar uri={member.avatar} size={64} />
+                <View style={styles.bannerCopy}>
+                  <Text style={[styles.name, {color: theme.text}]}>
+                    {member.name}
+                  </Text>
+                  <Text style={[styles.meta, {color: theme.textMuted}]}>
+                    {roleLabel(member)}
+                    {member.username ? `  ·  @${member.username}` : ''}
+                  </Text>
+                  {member.vehicle ? (
+                    <Text style={[styles.vehicle, {color: theme.textMuted}]}>
+                      {member.vehicle}
+                    </Text>
+                  ) : null}
+                </View>
+                <Icon name="chevron-right" size={16} color={theme.textMuted} />
+              </Pressable>
+            ))
+          : null}
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  kicker: {...typography.label},
-  title: {...typography.hero, fontSize: 26, marginTop: spacing.xs},
+  pad: {
+    paddingHorizontal: spacing.lg,
+  },
+  kicker: {...typography.label, letterSpacing: 2},
+  title: {...typography.hero, fontSize: 30, marginTop: spacing.xs},
   sub: {
     ...typography.subtitle,
     marginTop: spacing.sm,
@@ -166,13 +260,16 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   filterLabel: {...typography.label, letterSpacing: 1.4},
-  row: {
+  banner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: spacing.sm,
   },
-  name: {...typography.title, fontSize: 16},
-  meta: {...typography.caption, marginTop: 3, letterSpacing: 1.2},
+  bannerCopy: {flex: 1},
+  name: {...typography.title, fontSize: 17},
+  meta: {...typography.caption, marginTop: 4, letterSpacing: 1.1},
+  vehicle: {...typography.caption, marginTop: 4},
 });

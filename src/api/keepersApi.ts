@@ -96,7 +96,8 @@ export function mapApiTrip(t: any): Trip {
     date: mapTripDate(t.date),
     time: t.time ? String(t.time).slice(0, 5) : '',
     difficulty: t.difficulty || 'Moderate',
-    tripType: t.tripType || '',
+    category: t.category || t.tripType || 'Trips & Events',
+    tripType: t.tripType || t.category || '',
     requiredMembership: asMembership(
       t.requiredMembership || t.requiredMembershipCode,
     ),
@@ -332,15 +333,37 @@ export async function fetchEvents() {
 }
 
 export async function fetchTrips(
-  params: {filter?: string; q?: string; from?: string; to?: string} = {},
+  params: {
+    filter?: string;
+    q?: string;
+    category?: string;
+    from?: string;
+    to?: string;
+  } = {},
 ) {
   const qs = new URLSearchParams();
   if (params.filter) qs.set('filter', params.filter);
   if (params.q) qs.set('q', params.q);
+  if (params.category) qs.set('category', params.category);
   if (params.from) qs.set('from', params.from);
   if (params.to) qs.set('to', params.to);
   const data = await apiRequest<{items: any[]}>('/trips?' + qs.toString());
   return (data.items || []).map(mapApiTrip);
+}
+
+export async function fetchTripWeather(tripId: string) {
+  return apiRequest<{
+    available: boolean;
+    kind: string | null;
+    summary: string | null;
+    date: string | null;
+    locationLabel: string | null;
+    temperatureMaxC: number | null;
+    temperatureMinC: number | null;
+    precipitationProbability: number | null;
+    weatherLabel: string | null;
+    message: string | null;
+  }>(`/trips/${tripId}/weather`);
 }
 
 export async function fetchCalendar(params: {from?: string; to?: string} = {}) {

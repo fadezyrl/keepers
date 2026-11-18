@@ -10,6 +10,7 @@ import {LoadingState, Screen} from '../components';
 import {linkingConfig, parseRecoveryParams} from '../config/linking';
 import {useApp} from '../context/AppContext';
 import {setPushNavigationRef} from '../notifications/navigationFromPush';
+import {AboutScreen} from '../screens/about/AboutScreen';
 import {
   ClubBrochureScreen,
   ClubProtocolsScreen,
@@ -38,6 +39,7 @@ import {MyProgressScreen} from '../screens/progress/MyProgressScreen';
 import {MyTripPerformanceScreen} from '../screens/progress/MyTripPerformanceScreen';
 import {RegistrationConfirmScreen} from '../screens/trips/RegistrationConfirmScreen';
 import {TripDetailsScreen} from '../screens/trips/TripDetailsScreen';
+import {TripsScreen} from '../screens/trips/TripsScreen';
 import {useThemeColors} from '../theme';
 import {AuthNavigator} from './AuthNavigator';
 import {MainTabNavigator} from './MainTabNavigator';
@@ -56,6 +58,7 @@ function AppStack() {
         animation: 'fade_from_bottom',
       }}>
       <Stack.Screen name="Main" component={MainTabNavigator} />
+      <Stack.Screen name="Trips" component={TripsScreen} />
       <Stack.Screen name="TripDetails" component={TripDetailsScreen} />
       <Stack.Screen
         name="RegistrationConfirm"
@@ -79,6 +82,7 @@ function AppStack() {
       />
       <Stack.Screen name="MembersDirectory" component={MembersDirectoryScreen} />
       <Stack.Screen name="MemberProfile" component={MemberProfileScreen} />
+      <Stack.Screen name="About" component={AboutScreen} />
       <Stack.Screen name="DisplayMode" component={DisplayModeScreen} />
       <Stack.Screen
         name="ClubProtocols"

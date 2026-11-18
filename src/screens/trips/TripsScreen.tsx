@@ -12,7 +12,7 @@ import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RouteProp} from '@react-navigation/native';
 import {
   AdventureCalendar,
-  AppHeader,
+  BackHeader,
   CapacityRing,
   EmptyState,
   FilterChips,
@@ -29,7 +29,7 @@ import {
   useCachedTripsList,
   usePrefetchCalendarMonth,
 } from '../../hooks/useCachedQueries';
-import {MainTabParamList, RootStackParamList} from '../../navigation/types';
+import {RootStackParamList} from '../../navigation/types';
 import {colors, spacing, typography, useThemeColors} from '../../theme';
 import {MemberTripHistoryItem, Trip, TripsTab} from '../../types';
 import {
@@ -55,7 +55,7 @@ import {
 } from '../../utils/tripPresentation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type TripsRoute = RouteProp<MainTabParamList, 'Trips'>;
+type TripsRoute = RouteProp<RootStackParamList, 'Trips'>;
 
 function organizerLabel(trip: Trip): string {
   const name = trip.organizer?.name?.trim();
@@ -83,7 +83,7 @@ function TripCard({
     trip.meetingPoint?.trim() ||
     '';
   const createdBy = organizerLabel(trip);
-  const level = trip.requiredMembership || trip.difficulty || '';
+  const level = trip.category || trip.requiredMembership || trip.difficulty || '';
 
   return (
     <Pressable
@@ -115,7 +115,7 @@ function TripCard({
           ) : null}
           {level ? (
             <Text style={styles.meta} numberOfLines={1}>
-              Level · {level}
+              {trip.category ? level : `Level · ${level}`}
             </Text>
           ) : null}
           <Text style={styles.meta} numberOfLines={1}>
@@ -557,7 +557,7 @@ export function TripsScreen() {
       edges={['top']}
       onRefresh={onRefresh}
       scrollHandleRef={scrollHandleRef}>
-      <AppHeader />
+      <BackHeader onBack={() => navigation.goBack()} />
       <View style={styles.content}>
         <Text style={[styles.pageTitle, {color: theme.text}]}>Adventures</Text>
         <Text style={[styles.pageSub, {color: theme.textMuted}]}>

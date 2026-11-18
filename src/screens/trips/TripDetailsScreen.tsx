@@ -30,6 +30,7 @@ import {
   VehicleReadinessSheet,
   VideoPlayer,
 } from '../../components';
+import {fetchTripWeather} from '../../api/keepersApi';
 import {useApp} from '../../context/AppContext';
 import {useCachedTrip} from '../../hooks/useCachedQueries';
 import {usePullToRefresh} from '../../hooks/usePullToRefresh';
@@ -52,6 +53,8 @@ import {
   isTripCancelled,
   isTripFull,
 } from '../../utils/tripPresentation';
+
+type TripWeather = Awaited<ReturnType<typeof fetchTripWeather>>;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripDetails'>;
 
@@ -120,7 +123,6 @@ export function TripDetailsScreen({navigation, route}: Props) {
     await tripQuery.refetch();
   });
 
-  const [aboutOpen, setAboutOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -130,6 +132,8 @@ export function TripDetailsScreen({navigation, route}: Props) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeVideoUri, setActiveVideoUri] = useState<string | null>(null);
+  const [weather, setWeather] = useState<TripWeather | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
 
   const eligibility = useMemo(() => {
     if (!trip) {
@@ -149,6 +153,41 @@ export function TripDetailsScreen({navigation, route}: Props) {
       prev && videos.includes(prev) ? prev : videos[0],
     );
   }, [tripVideoKey]);
+
+  useEffect(() => {
+    if (!trip?.id) {
+      setWeather(null);
+      return;
+    }
+    let cancelled = false;
+    setWeatherLoading(true);
+    fetchTripWeather(trip.id)
+      .then(data => {
+        if (!cancelled) setWeather(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWeather({
+            available: false,
+            kind: null,
+            summary: null,
+            date: trip.date || null,
+            locationLabel: trip.location?.label || trip.destination || null,
+            temperatureMaxC: null,
+            temperatureMinC: null,
+            precipitationProbability: null,
+            weatherLabel: null,
+            message: 'Weather forecast is temporarily unavailable.',
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setWeatherLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [trip?.id, trip?.date, trip?.destination, trip?.location?.label]);
 
   if (loading && !trip) {
     return (
@@ -184,12 +223,6 @@ export function TripDetailsScreen({navigation, route}: Props) {
   const joinAllowed =
     canJoinTrip(trip) && eligibility.eligible && !isRegistered;
   const statusLabel = discoveryStatusLabel(discoveryStatus(trip));
-  const hasAboutContent = Boolean(
-    trip.description?.trim() ||
-      trip.instructions?.trim() ||
-      trip.routeSummary?.trim(),
-  );
-
   const onShare = async () => {
     try {
       await Share.share({
@@ -341,63 +374,54 @@ export function TripDetailsScreen({navigation, route}: Props) {
 
             <View style={styles.heroCopy}>
               <StatusPill status={trip.status} tone="dark" label={statusLabel} />
+              {trip.category ? (
+                <Text style={styles.heroCategory}>{trip.category}</Text>
+              ) : null}
               <Text style={styles.heroTitle}>{trip.title}</Text>
               <Text style={styles.heroDestination}>{trip.destination}</Text>
-              <Text style={styles.heroDestination}>
-                {formatTripDate(trip.date, trip.time)}
-              </Text>
             </View>
           </View>
 
           <View style={[styles.infoPanel, {backgroundColor: theme.bg}]}>
-            <View
-              style={[
-                styles.organizerRow,
-                {borderBottomColor: theme.border},
-              ]}>
-              <Avatar uri={trip.organizer.avatar} size={52} />
-              <View style={styles.organizerCopy}>
-                <Text style={[styles.organizerLabel, {color: theme.textMuted}]}>
-                  Organized by Marshall
-                </Text>
-                <Text style={[styles.organizerName, {color: theme.text}]}>
-                  {trip.organizer.name}
-                </Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Call organizer"
-                onPress={onCallOrganizer}
-                style={({pressed}) => [
-                  styles.callBtn,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor: theme.bgMuted,
-                  },
-                  pressed && {opacity: 0.7},
-                ]}>
-                <Icon name="phone" size={18} color={theme.text} />
-              </Pressable>
-            </View>
+            <Text style={[styles.sectionEyebrow, {color: theme.textMuted}]}>
+              Description
+            </Text>
+            <Text style={[styles.descriptionBody, {color: theme.text}]}>
+              {trip.description?.trim() ||
+                'No description has been provided for this adventure yet.'}
+            </Text>
 
+            <Text
+              style={[
+                styles.sectionEyebrow,
+                {color: theme.textMuted, marginTop: spacing.lg},
+              ]}>
+              Drive information
+            </Text>
             <InfoRow
               icon="calendar"
-              label="Date & time"
+              label="Date & start time"
               value={formatTripDate(trip.date, trip.time)}
             />
             <InfoRow
-              icon="badge"
-              label="Membership level"
-              value={trip.requiredMembership}
+              icon="map-pin"
+              label="Meeting point"
+              value={trip.meetingPoint || trip.location.label}
             />
             <InfoRow
-              icon="star"
-              label="Minimum trips"
-              value={
-                trip.minTripsRequired === 0
-                  ? 'No minimum'
-                  : `${trip.minTripsRequired} completed`
-              }
+              icon="globe"
+              label="Destination / route"
+              value={trip.routeSummary?.trim() || trip.destination}
+            />
+            <InfoRow
+              icon="car"
+              label="Category"
+              value={trip.category || trip.tripType || '—'}
+            />
+            <InfoRow
+              icon="badge"
+              label="Registration"
+              value={statusLabel}
             />
             <InfoRow
               icon="users"
@@ -407,15 +431,41 @@ export function TripDetailsScreen({navigation, route}: Props) {
               actionLabel="View"
               onAction={() => setMembersOpen(true)}
             />
-            <InfoRow icon="car" label="Trip type" value={trip.tripType} />
             <InfoRow
-              icon="map-pin"
-              label="Location"
-              value={trip.location.label}
-              actionLabel="Maps"
-              onAction={onOpenMaps}
-              last
+              icon="star"
+              label="Difficulty"
+              value={trip.difficulty}
             />
+            <InfoRow
+              icon="badge"
+              label="Required membership"
+              value={trip.requiredMembership}
+            />
+            {trip.vehicleRequirements?.trim() ? (
+              <InfoRow
+                icon="car"
+                label="Vehicle requirements"
+                value={trip.vehicleRequirements}
+              />
+            ) : null}
+            {trip.instructions?.trim() ? (
+              <InfoRow
+                icon="alert"
+                label="Instructions"
+                value={trip.instructions}
+                last
+              />
+            ) : (
+              <InfoRow
+                icon="map-pin"
+                label="Location"
+                value={trip.location.label}
+                actionLabel="Maps"
+                onAction={onOpenMaps}
+                last
+              />
+            )}
+
             <Button
               label="Add to Phone Calendar"
               variant="secondary"
@@ -498,70 +548,6 @@ export function TripDetailsScreen({navigation, route}: Props) {
             ) : null}
           </View>
 
-          <View style={styles.aboutBand}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{expanded: aboutOpen}}
-              onPress={() => setAboutOpen(open => !open)}
-              style={styles.aboutHeader}>
-              <View>
-                <Text style={styles.aboutEyebrow}>About the trip</Text>
-                <Text style={styles.aboutTitle}>{trip.title}</Text>
-              </View>
-              <Icon
-                name={aboutOpen ? 'chevron-up' : 'chevron-down'}
-                color={colors.ivory}
-                size={20}
-              />
-            </Pressable>
-
-            {aboutOpen ? (
-              <View style={styles.aboutBody}>
-                <Text style={styles.aboutMeta}>
-                  {formatTripDate(trip.date, trip.time)}
-                  {'  ·  '}
-                  {trip.destination}
-                </Text>
-
-                {!hasAboutContent ? (
-                  <Text style={styles.aboutEmpty}>
-                    No description has been provided for this adventure yet.
-                  </Text>
-                ) : (
-                  <>
-                    {trip.description?.trim() ? (
-                      <Text style={styles.aboutCopy}>{trip.description}</Text>
-                    ) : null}
-                    {trip.routeSummary?.trim() ? (
-                      <View style={styles.instructionsBlock}>
-                        <Text style={styles.instructionsLabel}>Itinerary</Text>
-                        <Text style={styles.aboutCopy}>{trip.routeSummary}</Text>
-                      </View>
-                    ) : null}
-                    {trip.instructions?.trim() ? (
-                      <View style={styles.instructionsBlock}>
-                        <Text style={styles.instructionsLabel}>
-                          Important instructions
-                        </Text>
-                        <Text style={styles.aboutCopy}>{trip.instructions}</Text>
-                      </View>
-                    ) : null}
-                    {trip.vehicleRequirements?.trim() ? (
-                      <View style={styles.instructionsBlock}>
-                        <Text style={styles.instructionsLabel}>
-                          Vehicle requirements
-                        </Text>
-                        <Text style={styles.aboutCopy}>
-                          {trip.vehicleRequirements}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </>
-                )}
-              </View>
-            ) : null}
-          </View>
-
           {trip.gallery && trip.gallery.length > 0 ? (
             <View style={styles.gallerySection}>
               <Text style={[styles.galleryTitle, {color: theme.text}]}>
@@ -586,6 +572,89 @@ export function TripDetailsScreen({navigation, route}: Props) {
               </ScrollView>
             </View>
           ) : null}
+
+          <View style={[styles.infoPanel, {backgroundColor: theme.bg, paddingTop: 0}]}>
+            <Text style={[styles.sectionEyebrow, {color: theme.textMuted}]}>
+              Organising Marshall
+            </Text>
+            <View
+              style={[
+                styles.organizerRow,
+                {borderBottomColor: theme.border},
+              ]}>
+              <Avatar uri={trip.organizer.avatar} size={52} />
+              <View style={styles.organizerCopy}>
+                <Text style={[styles.organizerLabel, {color: theme.textMuted}]}>
+                  {trip.organizer.role || 'Marshall'}
+                </Text>
+                <Text style={[styles.organizerName, {color: theme.text}]}>
+                  {trip.organizer.name}
+                </Text>
+              </View>
+              {trip.organizer.phone ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Call organizer"
+                  onPress={onCallOrganizer}
+                  style={({pressed}) => [
+                    styles.callBtn,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.bgMuted,
+                    },
+                    pressed && {opacity: 0.7},
+                  ]}>
+                  <Icon name="phone" size={18} color={theme.text} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <Text
+              style={[
+                styles.sectionEyebrow,
+                {color: theme.textMuted, marginTop: spacing.lg},
+              ]}>
+              Weather
+            </Text>
+            <View
+              style={[
+                styles.weatherCard,
+                {borderColor: theme.border, backgroundColor: theme.surface},
+              ]}>
+              {weatherLoading ? (
+                <Text style={[styles.weatherMuted, {color: theme.textMuted}]}>
+                  Loading drive-day forecast…
+                </Text>
+              ) : weather?.available ? (
+                <>
+                  <Text style={[styles.weatherKind, {color: theme.textMuted}]}>
+                    {weather.summary || 'Drive-day forecast'}
+                    {weather.date ? ` · ${weather.date}` : ''}
+                  </Text>
+                  <Text style={[styles.weatherLabel, {color: theme.text}]}>
+                    {weather.weatherLabel || 'Forecast'}
+                  </Text>
+                  <Text style={[styles.weatherMuted, {color: theme.textMuted}]}>
+                    {weather.locationLabel || trip.destination}
+                  </Text>
+                  <Text style={[styles.weatherTemps, {color: theme.text}]}>
+                    {weather.temperatureMinC != null &&
+                    weather.temperatureMaxC != null
+                      ? `${Math.round(weather.temperatureMinC)}° – ${Math.round(weather.temperatureMaxC)}°C`
+                      : 'Temperatures unavailable'}
+                    {weather.precipitationProbability != null
+                      ? `  ·  ${weather.precipitationProbability}% precip.`
+                      : ''}
+                  </Text>
+                </>
+              ) : (
+                <Text style={[styles.weatherMuted, {color: theme.textMuted}]}>
+                  {weather?.message ||
+                    'Forecast unavailable for this drive location or date.'}
+                </Text>
+              )}
+            </View>
+          </View>
 
           {!eligibility.eligible && !isRegistered && !isPast && !isCancelled ? (
             <View
@@ -922,6 +991,45 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     color: colors.cream,
     marginTop: spacing.xs,
+  },
+  heroCategory: {
+    ...typography.label,
+    color: colors.greige,
+    letterSpacing: 2,
+    marginTop: spacing.sm,
+  },
+  sectionEyebrow: {
+    ...typography.label,
+    letterSpacing: 2,
+    marginBottom: spacing.sm,
+  },
+  descriptionBody: {
+    ...typography.subtitle,
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: spacing.md,
+  },
+  weatherCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+  },
+  weatherKind: {
+    ...typography.caption,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  weatherLabel: {
+    ...typography.title,
+    fontSize: 18,
+    marginTop: spacing.xs,
+  },
+  weatherMuted: {
+    ...typography.subtitle,
+    marginTop: spacing.xs,
+  },
+  weatherTemps: {
+    ...typography.subtitle,
+    marginTop: spacing.sm,
   },
   infoPanel: {
     paddingHorizontal: spacing.lg,

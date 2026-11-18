@@ -308,7 +308,7 @@ export function MyProgressScreen({navigation}: Props) {
       <Button
         label="View My Trips"
         onPress={() =>
-          navigation.navigate('Main', {screen: 'Trips', params: {tab: 'mine'}})
+          navigation.navigate('Trips', {tab: 'mine'})
         }
         style={{marginTop: spacing.lg, marginBottom: spacing.xxl}}
       />

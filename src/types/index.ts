@@ -85,6 +85,8 @@ export interface Trip {
   date: string;
   time: string;
   difficulty: Difficulty;
+  /** Canonical drive category (Desert / Camping / Mountain / Trips & Events). */
+  category: string;
   tripType: string;
   requiredMembership: MembershipLevel;
   minTripsRequired: number;

@@ -76,7 +76,9 @@ export function AdventureCarousel({
           </View>
 
           <View style={styles.bottom}>
-            <Text style={styles.difficulty}>{item.difficulty}</Text>
+            <Text style={styles.difficulty}>
+              {item.category || item.difficulty}
+            </Text>
             <Text style={styles.title} numberOfLines={2}>
               {item.title}
             </Text>

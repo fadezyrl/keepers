@@ -45,12 +45,13 @@ export const linkingConfig: LinkingOptions<RootStackParamList> = {
     screens: {
       Main: {
         screens: {
-          Home: 'home',
-          Trips: 'trips',
-          Settings: 'settings',
-          About: 'about',
+          Discover: 'home',
+          Members: 'members',
+          Gallery: 'gallery',
+          Profile: 'settings',
         },
       },
+      Trips: 'trips',
       TripDetails: 'trips/:tripId',
       Notifications: 'notifications',
       MyProgress: 'progress',

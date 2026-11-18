@@ -109,14 +109,19 @@ export function SettingsScreen() {
           <SettingsRow
             icon="trips"
             label="My Trips"
-            onPress={() =>
-              navigation.navigate('Main', {screen: 'Trips', params: {tab: 'mine'}})
-            }
+            onPress={() => navigation.navigate('Trips', {tab: 'mine'})}
           />
           <SettingsRow
             icon="users"
             label="Members"
-            onPress={() => navigation.navigate('MembersDirectory')}
+            onPress={() =>
+              navigation.navigate('Main', {screen: 'Members'})
+            }
+          />
+          <SettingsRow
+            icon="about"
+            label="About Keepers"
+            onPress={() => navigation.navigate('About')}
           />
           <SettingsRow
             icon="mail"

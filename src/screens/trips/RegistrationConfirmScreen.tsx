@@ -104,7 +104,7 @@ export function RegistrationConfirmScreen({navigation, route}: Props) {
         />
         <Button
           label="Explore More Adventures"
-          onPress={() => navigation.navigate('Main', {screen: 'Trips'} as never)}
+          onPress={() => navigation.navigate('Trips')}
           variant="ghost"
           style={{marginTop: spacing.sm}}
         />

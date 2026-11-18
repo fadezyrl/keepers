@@ -55,6 +55,7 @@ describe('mapApiTrip media + registration fields', () => {
       location: {label: 'Liwa', latitude: 0, longitude: 0},
     });
 
+    expect(trip.category).toBe('Trips & Events');
     expect(trip.videos).toEqual(['https://cdn.example/v1.mp4']);
     expect(trip.mediaItems).toEqual([
       {

@@ -9,14 +9,15 @@ export type AuthStackParamList = {
 };
 
 export type MainTabParamList = {
-  Home: undefined;
-  Trips: {tab?: 'upcoming' | 'calendar' | 'mine'} | undefined;
-  Settings: undefined;
-  About: undefined;
+  Discover: {category?: string} | undefined;
+  Members: undefined;
+  Gallery: undefined;
+  Profile: undefined;
 };
 
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList>;
+  Trips: {tab?: 'upcoming' | 'calendar' | 'mine'} | undefined;
   TripDetails: {tripId: string};
   RegistrationConfirm: {
     tripId: string;
@@ -31,6 +32,7 @@ export type RootStackParamList = {
   ForgotPasswordModal: undefined;
   MembersDirectory: undefined;
   MemberProfile: {memberId: string};
+  About: undefined;
   DisplayMode: undefined;
   ClubProtocols: undefined;
   SafetyBriefing: undefined;

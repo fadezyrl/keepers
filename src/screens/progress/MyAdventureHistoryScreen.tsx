@@ -15,7 +15,7 @@ export function MyAdventureHistoryScreen({navigation}: Props) {
   const theme = useThemeColors();
 
   useEffect(() => {
-    navigation.replace('Main', {screen: 'Trips', params: {tab: 'mine'}});
+    navigation.replace('Trips', {tab: 'mine'});
   }, [navigation]);
 
   return (

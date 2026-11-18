@@ -71,12 +71,12 @@ export function navigateFromDeepLink(raw: string | null | undefined): boolean {
     }
 
     if (link.includes('/settings') || link.includes('MemberProfile')) {
-      navigationRef.navigate('Main', {screen: 'Settings'});
+      navigationRef.navigate('Main', {screen: 'Profile'});
       return true;
     }
 
     if (link.includes('/home')) {
-      navigationRef.navigate('Main', {screen: 'Home'});
+      navigationRef.navigate('Main', {screen: 'Discover'});
       return true;
     }
 

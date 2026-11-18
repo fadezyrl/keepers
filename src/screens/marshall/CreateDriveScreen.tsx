@@ -23,6 +23,10 @@ import {
 } from '../../components';
 import {createTripRequest, mapApiTrip} from '../../api/keepersApi';
 import {invalidateAfterMarshallMutation, useCacheSession} from '../../cache';
+import {
+  TRIP_CATEGORIES,
+  TripCategory,
+} from '../../constants/tripCategories';
 import {useApp} from '../../context/AppContext';
 import {RootStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
@@ -34,7 +38,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CreateDrive'>;
 const DIFFICULTIES: Difficulty[] = ['Easy', 'Moderate', 'Advanced', 'Expert'];
 
 type FieldErrors = Partial<
-  Record<'title' | 'destination' | 'date' | 'time' | 'capacity', string>
+  Record<
+    'title' | 'destination' | 'date' | 'time' | 'capacity' | 'category',
+    string
+  >
 >;
 
 function toDateApi(value: Date): string {
@@ -81,6 +88,7 @@ export function CreateDriveScreen({navigation}: Props) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('Moderate');
+  const [category, setCategory] = useState<TripCategory>('Trips & Events');
   const [capacity, setCapacity] = useState('20');
   const [coverUrl, setCoverUrl] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -207,6 +215,7 @@ export function CreateDriveScreen({navigation}: Props) {
         date: toDateApi(dateValue!),
         time: timeValue ? toTimeApi(timeValue) : undefined,
         difficulty,
+        category,
         maxParticipants,
         coverImage: coverUrl.trim() || undefined,
         publish,
@@ -367,6 +376,38 @@ export function CreateDriveScreen({navigation}: Props) {
           ) : null}
         </View>
       ) : null}
+
+      <Text style={[styles.fieldLabel, {color: theme.textMuted}]}>
+        Category *
+      </Text>
+      <View style={styles.chips}>
+        {TRIP_CATEGORIES.map(item => {
+          const active = category === item;
+          return (
+            <Pressable
+              key={item}
+              onPress={() => {
+                setCategory(item);
+                clearFieldError('category');
+              }}
+              style={[
+                styles.chip,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: active ? theme.inverse : theme.surface,
+                },
+              ]}>
+              <Text
+                style={[
+                  styles.chipLabel,
+                  {color: active ? theme.onInverse : theme.textMuted},
+                ]}>
+                {item}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <Text style={[styles.fieldLabel, {color: theme.textMuted}]}>
         Difficulty *

@@ -3,20 +3,20 @@ import {StyleSheet, View} from 'react-native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Icon, IconName} from '../components';
-import {AboutScreen} from '../screens/about/AboutScreen';
+import {GalleryScreen} from '../screens/gallery/GalleryScreen';
 import {HomeScreen} from '../screens/home/HomeScreen';
+import {MembersDirectoryScreen} from '../screens/settings/MembersDirectoryScreen';
 import {SettingsScreen} from '../screens/settings/SettingsScreen';
-import {TripsScreen} from '../screens/trips/TripsScreen';
 import {colors, spacing, useThemeColors} from '../theme';
 import {MainTabParamList} from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 const icons: Record<keyof MainTabParamList, IconName> = {
-  Home: 'home',
-  Trips: 'trips',
-  Settings: 'settings',
-  About: 'about',
+  Discover: 'home',
+  Members: 'users',
+  Gallery: 'camera',
+  Profile: 'user',
 };
 
 export function MainTabNavigator() {
@@ -60,10 +60,26 @@ export function MainTabNavigator() {
           </View>
         ),
       })}>
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Trips" component={TripsScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
-      <Tab.Screen name="About" component={AboutScreen} />
+      <Tab.Screen
+        name="Discover"
+        component={HomeScreen}
+        options={{tabBarLabel: 'Discover'}}
+      />
+      <Tab.Screen
+        name="Members"
+        component={MembersDirectoryScreen}
+        options={{tabBarLabel: 'Members'}}
+      />
+      <Tab.Screen
+        name="Gallery"
+        component={GalleryScreen}
+        options={{tabBarLabel: 'Gallery'}}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={SettingsScreen}
+        options={{tabBarLabel: 'Profile'}}
+      />
     </Tab.Navigator>
   );
 }
