@@ -108,7 +108,11 @@ export function LoginScreen({navigation}: Props) {
         <Button label="Sign in" onPress={onSubmit} loading={loading} />
         <Button
           label="Forgot password?"
-          onPress={() => navigation.navigate('ForgotPassword')}
+          onPress={() =>
+            navigation.navigate('ForgotPassword', {
+              email: email.trim() || undefined,
+            })
+          }
           variant="ghost"
           style={styles.link}
         />

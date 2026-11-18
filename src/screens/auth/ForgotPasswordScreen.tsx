@@ -1,8 +1,10 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {showAlert} from '../../alerts';
 import {Button, Input, Screen} from '../../components';
+import {STORAGE_KEYS} from '../../config/api';
 import {useApp} from '../../context/AppContext';
 import {AuthStackParamList} from '../../navigation/types';
 import {spacing, typography, useThemeColors} from '../../theme';
@@ -10,12 +12,30 @@ import {FieldErrors, validateForgotPassword} from '../../utils/validation';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 
-export function ForgotPasswordScreen({navigation}: Props) {
+export function ForgotPasswordScreen({navigation, route}: Props) {
   const theme = useThemeColors();
   const {requestPasswordReset} = useApp();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(route.params?.email?.trim() || '');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (route.params?.email?.trim()) {
+      setEmail(route.params.email.trim());
+      return;
+    }
+    let cancelled = false;
+    AsyncStorage.getItem(STORAGE_KEYS.lastLoginEmail)
+      .then(saved => {
+        if (!cancelled && saved) {
+          setEmail(saved);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [route.params?.email]);
 
   const onSubmit = async () => {
     const nextErrors = validateForgotPassword(email);
@@ -54,8 +74,8 @@ export function ForgotPasswordScreen({navigation}: Props) {
         </Text>
         <Text style={[styles.heading, {color: theme.text}]}>Reset password</Text>
         <Text style={[styles.sub, {color: theme.textMuted}]}>
-          Enter your membership email. We will send a secure reset link that opens
-          this app.
+          Confirm your membership email. We will send a secure reset link. Open
+          it on this phone — if a browser page appears, tap “Open Keepers app”.
         </Text>
       </View>
 

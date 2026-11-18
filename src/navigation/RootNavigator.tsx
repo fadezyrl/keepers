@@ -131,6 +131,7 @@ export function RootNavigator() {
     bootstrapped,
     authMode,
     displayMode,
+    recoveryAccessToken,
     setRecoveryAccessToken,
     setOffline,
   } = useApp();
@@ -145,10 +146,22 @@ export function RootNavigator() {
   useEffect(() => {
     const handleUrl = (url: string | null) => {
       if (!url) return;
-      const {accessToken, type} = parseRecoveryParams(url);
-      if (accessToken && (type === 'recovery' || !type || url.includes('reset-password'))) {
+      const {accessToken, type, error, errorDescription} =
+        parseRecoveryParams(url);
+      if (error) {
+        // Keep user in auth flow; Reset screen will show a clear message.
+        setRecoveryAccessToken(null);
+        return;
+      }
+      const isRecovery =
+        type === 'recovery' ||
+        !type ||
+        url.includes('reset-password') ||
+        url.includes('mobile-reset');
+      if (accessToken && isRecovery) {
         setRecoveryAccessToken(accessToken);
       }
+      void errorDescription;
     };
 
     Linking.getInitialURL()
@@ -189,7 +202,16 @@ export function RootNavigator() {
         ref={navRef}
         theme={navTheme}
         linking={linkingConfig}>
-        {authMode === 'app' ? <AppStack /> : <AuthNavigator />}
+        {authMode === 'app' ? (
+          <AppStack />
+        ) : (
+          <AuthNavigator
+            key={
+              // Remount auth stack when a recovery token arrives so ResetPassword opens.
+              recoveryAccessToken ? `reset-${recoveryAccessToken.slice(0, 12)}` : 'auth'
+            }
+          />
+        )}
       </NavigationContainer>
     </View>
   );

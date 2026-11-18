@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -63,24 +63,54 @@ export function MembersDirectoryScreen() {
   const [remoteItems, setRemoteItems] = useState<ClubMember[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const searchGenRef = useRef(0);
 
   const parentState = navigation.getParent()?.getState?.();
   const isTab =
     Array.isArray(parentState?.routeNames) &&
     parentState.routeNames.includes('Discover');
 
+  const clearSearch = useCallback(() => {
+    searchGenRef.current += 1;
+    setQuery('');
+    setDebouncedQ('');
+    setRemoteItems(null);
+    setError(null);
+    setLoading(false);
+  }, []);
+
+  const onChangeQuery = useCallback((text: string) => {
+    setQuery(text);
+    // Clearing should reset instantly — don't wait for debounce / in-flight search.
+    if (!text.trim()) {
+      searchGenRef.current += 1;
+      setDebouncedQ('');
+      setRemoteItems(null);
+      setError(null);
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    const handle = setTimeout(() => setDebouncedQ(query.trim()), 300);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setDebouncedQ('');
+      return;
+    }
+    const handle = setTimeout(() => setDebouncedQ(trimmed), 300);
     return () => clearTimeout(handle);
   }, [query]);
 
   const runSearch = useCallback(async () => {
     // Server search only when querying — never mixes drives/gallery.
     if (!debouncedQ && level === 'All') {
+      searchGenRef.current += 1;
       setRemoteItems(null);
       setError(null);
+      setLoading(false);
       return;
     }
+    const gen = ++searchGenRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -88,14 +118,18 @@ export function MembersDirectoryScreen() {
         q: debouncedQ || undefined,
         membership: level === 'All' ? undefined : membershipCode(level),
       });
+      if (gen !== searchGenRef.current) return;
       setRemoteItems(items);
     } catch (err) {
+      if (gen !== searchGenRef.current) return;
       setError(
         err instanceof Error ? err.message : 'Unable to search members.',
       );
       setRemoteItems([]);
     } finally {
-      setLoading(false);
+      if (gen === searchGenRef.current) {
+        setLoading(false);
+      }
     }
   }, [debouncedQ, level]);
 
@@ -131,13 +165,23 @@ export function MembersDirectoryScreen() {
           <Icon name="search" size={18} color={theme.textMuted} />
           <TextInput
             value={query}
-            onChangeText={setQuery}
+            onChangeText={onChangeQuery}
             placeholder="Search members"
             placeholderTextColor={theme.textMuted}
             style={[styles.input, {color: theme.text}]}
             autoCorrect={false}
             autoCapitalize="none"
+            returnKeyType="search"
           />
+          {query.length > 0 ? (
+            <Pressable
+              onPress={clearSearch}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search">
+              <Icon name="close" size={18} color={theme.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={styles.filters}>
@@ -181,7 +225,7 @@ export function MembersDirectoryScreen() {
             message="Try a different name or membership filter."
             actionLabel="Reset"
             onAction={() => {
-              setQuery('');
+              clearSearch();
               setLevel('All');
             }}
           />

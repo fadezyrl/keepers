@@ -4,7 +4,7 @@ import {TripStatus, UserProfile} from '../types';
 export type AuthStackParamList = {
   Login: undefined;
   Signup: undefined;
-  ForgotPassword: undefined;
+  ForgotPassword: {email?: string} | undefined;
   ResetPassword: {accessToken?: string; email?: string} | undefined;
 };
 

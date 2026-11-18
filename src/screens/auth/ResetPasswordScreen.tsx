@@ -28,7 +28,7 @@ export function ResetPasswordScreen({navigation, route}: Props) {
         type: 'warning',
         title: 'Invalid reset link',
         message:
-          'Open the password reset link from your email on this device.',
+          'Open the newest “Reset password” email on this phone. Tap the link, then “Open Keepers app” if asked.',
       });
       return;
     }
@@ -71,7 +71,7 @@ export function ResetPasswordScreen({navigation, route}: Props) {
         <Text style={[styles.sub, {color: theme.textMuted}]}>
           {accessToken
             ? 'Set a new password for your Keepers account.'
-            : 'This screen opens from the reset link in your email.'}
+            : 'Open the reset link from your email on this phone. If the browser opens first, tap “Open Keepers app”.'}
         </Text>
       </View>
 
